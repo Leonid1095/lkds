@@ -1,0 +1,113 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>Бронирование переговорок</title>
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <header class="topbar">
+      <div>
+        <h1>Бронирование переговорок</h1>
+        <p class="subtitle">Без регистрации: выберите время и оставьте контакт для связи</p>
+      </div>
+      <div class="domain-badge" id="domainBadge">Домен: временный</div>
+    </header>
+
+    <main class="layout">
+      <section class="card">
+        <h2>Расписание по часам</h2>
+        <div class="controls">
+          <label>
+            Переговорка
+            <select id="roomSelect"></select>
+          </label>
+          <label>
+            Дата
+            <input id="dateInput" type="date" />
+          </label>
+          <button id="refreshBtn" type="button">Обновить</button>
+        </div>
+        <div id="scheduleGrid"></div>
+        <div id="dayBookings" class="bookings-list"></div>
+      </section>
+
+      <section class="card">
+        <h2>Новая бронь</h2>
+        <form id="bookingForm" class="form-grid">
+          <label>
+            ФИО
+            <input name="fullName" placeholder="Иванов Иван Иванович" required />
+          </label>
+          <label>
+            Telegram
+            <input name="telegram" placeholder="@username" required />
+          </label>
+          <label>
+            Переговорка
+            <select name="roomId" id="bookingRoomSelect" required></select>
+          </label>
+          <label>
+            Дата
+            <input name="date" id="bookingDate" type="date" required />
+          </label>
+          <label>
+            С
+            <input name="startHour" type="number" min="8" max="20" required />
+          </label>
+          <label>
+            До
+            <input name="endHour" type="number" min="9" max="21" required />
+          </label>
+          <label class="full-width">
+            Цель встречи
+            <input name="topic" placeholder="Например: согласование задач" required />
+          </label>
+          <button type="submit">Забронировать</button>
+        </form>
+        <p id="bookingMessage" class="message"></p>
+      </section>
+
+      <section class="card">
+        <h2>Полезные ссылки</h2>
+        <ul id="linksList" class="links-list"></ul>
+      </section>
+
+      <section class="card">
+        <h2>Заявка по проблеме 1С CRM</h2>
+        <form id="crmForm" class="form-grid">
+          <label>
+            ФИО
+            <input name="fullName" required />
+          </label>
+          <label>
+            Telegram
+            <input name="telegram" placeholder="@username" required />
+          </label>
+          <label class="full-width">
+            Краткая тема
+            <input name="title" placeholder="Ошибка при сохранении сделки" required />
+          </label>
+          <label class="full-width">
+            Описание
+            <textarea name="description" rows="4" required></textarea>
+          </label>
+          <label>
+            Приоритет
+            <select name="priority">
+              <option value="low">Низкий</option>
+              <option value="normal" selected>Обычный</option>
+              <option value="high">Высокий</option>
+              <option value="critical">Критический</option>
+            </select>
+          </label>
+          <button type="submit">Отправить заявку</button>
+        </form>
+        <p id="crmMessage" class="message"></p>
+      </section>
+    </main>
+
+    <script type="module" src="/app.js"></script>
+  </body>
+</html>

@@ -1,0 +1,17 @@
+[
+  {
+    "id": "tg-apps-bot",
+    "title": "Telegram-бот для заявок",
+    "url": "https://t.me/example_bot"
+  },
+  {
+    "id": "max-group",
+    "title": "Общая группа в Max",
+    "url": "https://max.ru/example_group"
+  },
+  {
+    "id": "corp-portal",
+    "title": "Корпоративный портал",
+    "url": "https://dxlc.ru/"
+  }
+]
