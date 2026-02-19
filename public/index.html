@@ -3,110 +3,227 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>Бронирование переговорок</title>
+    <title>ЛКДС — Портал сотрудника</title>
     <link rel="stylesheet" href="/styles.css" />
   </head>
   <body>
-    <header class="topbar">
-      <div>
-        <h1>Бронирование переговорок</h1>
-        <p class="subtitle">Без регистрации: выберите время и оставьте контакт для связи</p>
-      </div>
-      <div class="domain-badge" id="domainBadge">Домен: временный</div>
-    </header>
-
-    <main class="layout">
-      <section class="card">
-        <h2>Расписание по часам</h2>
-        <div class="controls">
-          <label>
-            Переговорка
-            <select id="roomSelect"></select>
-          </label>
-          <label>
-            Дата
-            <input id="dateInput" type="date" />
-          </label>
-          <button id="refreshBtn" type="button">Обновить</button>
+    <!-- ══════ Экран авторизации ══════ -->
+    <div id="authScreen" class="auth-screen">
+      <div class="auth-card fade-in">
+        <div class="auth-logo">
+          <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
         </div>
-        <div id="scheduleGrid"></div>
-        <div id="dayBookings" class="bookings-list"></div>
-      </section>
+        <h1>ЛКДС</h1>
+        <p class="subtitle">Портал сотрудника</p>
 
-      <section class="card">
-        <h2>Новая бронь</h2>
-        <form id="bookingForm" class="form-grid">
+        <form id="loginForm" class="auth-form">
           <label>
-            ФИО
-            <input name="fullName" placeholder="Иванов Иван Иванович" required />
+            Пин-код
+            <input id="pinInput" name="pin" type="text" inputmode="numeric" maxlength="4"
+                   pattern="\d{4}" placeholder="4 цифры" required autocomplete="off" />
           </label>
+          <button type="submit" class="btn-primary">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
+            Войти
+          </button>
+          <p id="loginMessage" class="message"></p>
+        </form>
+
+        <div class="auth-divider"><span>или</span></div>
+
+        <details id="registerBlock">
+          <summary>Первый раз? Зарегистрироваться</summary>
+          <form id="registerForm" class="auth-form">
+            <label>
+              ФИО
+              <input name="fullName" placeholder="Иванов Иван Иванович" required />
+            </label>
+            <label>
+              Контакт (телефон или ссылка Max)
+              <input name="contact" placeholder="+7 999 123-45-67 или max.ru/user" required />
+            </label>
+            <label>
+              Придумайте пин-код (4 цифры)
+              <input name="pin" type="text" inputmode="numeric" maxlength="4"
+                     pattern="\d{4}" placeholder="1234" required autocomplete="off" />
+            </label>
+            <button type="submit" class="btn-primary">Зарегистрироваться</button>
+            <p id="registerMessage" class="message"></p>
+          </form>
+        </details>
+      </div>
+    </div>
+
+    <!-- ══════ Основная страница ══════ -->
+    <div id="mainScreen" class="hidden">
+      <header class="topbar">
+        <div class="topbar-left">
+          <svg class="topbar-icon" width="28" height="28" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M3 9l9-7 9 7v11a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2z"/>
+            <polyline points="9 22 9 12 15 12 15 22"/>
+          </svg>
+          <div>
+            <h1>ЛКДС</h1>
+            <p class="subtitle" id="userGreeting"></p>
+          </div>
+        </div>
+        <div class="topbar-right">
+          <button id="adminBtn" type="button" class="btn-accent hidden" title="Админка">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
+            Отчёты
+          </button>
+          <button id="suggestBtn" type="button" class="btn-accent" title="Предложить улучшение">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>
+            Идея
+          </button>
+          <button id="logoutBtn" type="button" class="btn-outline">
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4"/><polyline points="16 17 21 12 16 7"/><line x1="21" y1="12" x2="9" y2="12"/></svg>
+            Выйти
+          </button>
+        </div>
+      </header>
+
+      <!-- Навигация: вкладки -->
+      <nav class="tabs" id="mainTabs">
+        <button class="tab active" data-tab="schedule">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Переговорки
+        </button>
+        <button class="tab" data-tab="crm">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>
+          Заявка 1С CRM
+        </button>
+        <button class="tab" data-tab="links">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
+          Ссылки
+        </button>
+      </nav>
+
+      <main class="content">
+        <!-- Переговорки -->
+        <section class="panel active" id="panelSchedule">
+          <div class="card slide-up">
+            <div class="schedule-controls">
+              <label>
+                Комната
+                <select id="roomSelect"></select>
+              </label>
+              <label>
+                Дата
+                <input id="dateInput" type="date" />
+              </label>
+              <button id="refreshBtn" type="button" class="btn-secondary">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"/><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"/></svg>
+                Обновить
+              </button>
+            </div>
+            <div id="scheduleGrid"></div>
+            <p id="bookingMessage" class="message"></p>
+          </div>
+        </section>
+
+        <!-- Заявка 1С CRM -->
+        <section class="panel" id="panelCrm">
+          <div class="card slide-up">
+            <form id="ticketForm" class="crm-form">
+              <label>
+                Тип обращения
+                <select name="type" id="ticketType" required>
+                  <option value="error">Ошибка</option>
+                  <option value="suggestion">Предложение</option>
+                </select>
+              </label>
+              <label>
+                Модуль
+                <select name="module" id="ticketModule" required></select>
+              </label>
+              <label id="categoryLabel">
+                Категория ошибки
+                <select name="category" id="ticketCategory" required></select>
+              </label>
+              <label class="full-width">
+                Описание
+                <textarea name="description" rows="5" placeholder="Опишите подробно проблему или предложение (минимум 10 символов)..." required></textarea>
+              </label>
+              <button type="submit" class="btn-primary full-width">
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="22" y1="2" x2="11" y2="13"/><polygon points="22 2 15 22 11 13 2 9 22 2"/></svg>
+                Отправить заявку
+              </button>
+            </form>
+            <p id="ticketMessage" class="message"></p>
+          </div>
+        </section>
+
+        <!-- Ссылки -->
+        <section class="panel" id="panelLinks">
+          <div class="card slide-up">
+            <div id="linksGrid" class="links-grid"></div>
+          </div>
+        </section>
+
+        <!-- Админка (только для админов) -->
+        <section class="panel" id="panelAdmin">
+          <div class="card slide-up">
+            <div class="admin-tabs">
+              <button class="admin-tab active" data-atab="bookings">Бронирования</button>
+              <button class="admin-tab" data-atab="tickets">CRM-заявки</button>
+              <button class="admin-tab" data-atab="suggestions">Идеи</button>
+              <button class="admin-tab" data-atab="users">Пользователи</button>
+            </div>
+            <div id="adminContent" class="admin-content"></div>
+          </div>
+        </section>
+      </main>
+    </div>
+
+    <!-- ══════ Popup бронирования ══════ -->
+    <div id="bookingPopup" class="popup-overlay hidden">
+      <div class="popup-card fade-in">
+        <h3>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>
+          Записаться
+        </h3>
+        <form id="popupBookingForm" class="popup-form">
+          <div class="popup-time-row">
+            <label>С <select id="popupStartHour"></select></label>
+            <label>До <select id="popupEndHour"></select></label>
+          </div>
           <label>
-            Telegram
-            <input name="telegram" placeholder="@username" required />
-          </label>
-          <label>
-            Переговорка
-            <select name="roomId" id="bookingRoomSelect" required></select>
-          </label>
-          <label>
-            Дата
-            <input name="date" id="bookingDate" type="date" required />
-          </label>
-          <label>
-            С
-            <input name="startHour" type="number" min="8" max="20" required />
-          </label>
-          <label>
-            До
-            <input name="endHour" type="number" min="9" max="21" required />
-          </label>
-          <label class="full-width">
             Цель встречи
             <input name="topic" placeholder="Например: согласование задач" required />
           </label>
-          <button type="submit">Забронировать</button>
+          <div class="popup-actions">
+            <button type="submit" class="btn-primary">Записаться</button>
+            <button type="button" id="popupCancel" class="btn-outline-dark">Отмена</button>
+          </div>
         </form>
-        <p id="bookingMessage" class="message"></p>
-      </section>
+        <p id="popupMessage" class="message"></p>
+      </div>
+    </div>
 
-      <section class="card">
-        <h2>Полезные ссылки</h2>
-        <ul id="linksList" class="links-list"></ul>
-      </section>
-
-      <section class="card">
-        <h2>Заявка по проблеме 1С CRM</h2>
-        <form id="crmForm" class="form-grid">
+    <!-- ══════ Popup предложения ══════ -->
+    <div id="suggestPopup" class="popup-overlay hidden">
+      <div class="popup-card fade-in">
+        <h3>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 18h6"/><path d="M10 22h4"/><path d="M12 2a7 7 0 0 0-4 12.7V17h8v-2.3A7 7 0 0 0 12 2z"/></svg>
+          Предложение по улучшению
+        </h3>
+        <form id="suggestForm" class="popup-form">
           <label>
-            ФИО
-            <input name="fullName" required />
+            Ваша идея
+            <textarea name="text" rows="4" placeholder="Что можно улучшить на портале?" required></textarea>
           </label>
-          <label>
-            Telegram
-            <input name="telegram" placeholder="@username" required />
-          </label>
-          <label class="full-width">
-            Краткая тема
-            <input name="title" placeholder="Ошибка при сохранении сделки" required />
-          </label>
-          <label class="full-width">
-            Описание
-            <textarea name="description" rows="4" required></textarea>
-          </label>
-          <label>
-            Приоритет
-            <select name="priority">
-              <option value="low">Низкий</option>
-              <option value="normal" selected>Обычный</option>
-              <option value="high">Высокий</option>
-              <option value="critical">Критический</option>
-            </select>
-          </label>
-          <button type="submit">Отправить заявку</button>
+          <div class="popup-actions">
+            <button type="submit" class="btn-primary">Отправить</button>
+            <button type="button" id="suggestCancel" class="btn-outline-dark">Отмена</button>
+          </div>
         </form>
-        <p id="crmMessage" class="message"></p>
-      </section>
-    </main>
+        <p id="suggestMessage" class="message"></p>
+      </div>
+    </div>
 
     <script type="module" src="/app.js"></script>
   </body>

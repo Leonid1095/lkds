@@ -1,17 +1,26 @@
 [
   {
-    "id": "tg-apps-bot",
-    "title": "Telegram-бот для заявок",
-    "url": "https://t.me/example_bot"
+    "id": "it-bot",
+    "title": "ИТ-заявки",
+    "desc": "Оставить заявку по ИТ через @LKDS_IT_bot",
+    "url": "https://t.me/LKDS_IT_bot",
+    "icon": "headset",
+    "disabled": false
   },
   {
     "id": "max-group",
-    "title": "Общая группа в Max",
-    "url": "https://max.ru/example_group"
+    "title": "Общая группа Max",
+    "desc": "В разработке",
+    "url": "#",
+    "icon": "chat",
+    "disabled": true
   },
   {
     "id": "corp-portal",
     "title": "Корпоративный портал",
-    "url": "https://dxlc.ru/"
+    "desc": "dxlc.ru",
+    "url": "https://dxlc.ru/",
+    "icon": "globe",
+    "disabled": false
   }
 ]

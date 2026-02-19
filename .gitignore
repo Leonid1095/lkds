@@ -5,3 +5,9 @@ node_modules/
 *.log
 dist/
 build/
+
+# User data (contains personal info)
+data/users.json
+data/bookings.json
+data/tickets.json
+data/suggestions.json
