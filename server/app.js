@@ -1,5 +1,8 @@
 import dotenv from 'dotenv';
 import express from 'express';
+import helmet from 'helmet';
+import rateLimit from 'express-rate-limit';
+import multer from 'multer';
 import fs from 'node:fs/promises';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
@@ -13,6 +16,7 @@ const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const dataDir = path.join(rootDir, 'data');
 const publicDir = path.join(rootDir, 'public');
+const avatarsDir = path.join(dataDir, 'avatars');
 
 const app = express();
 const port = Number(process.env.PORT) || 3000;
@@ -31,6 +35,40 @@ const FILES = {
   tickets: path.join(dataDir, 'tickets.json'),
   suggestions: path.join(dataDir, 'suggestions.json')
 };
+
+/* ── Security middleware ── */
+
+app.use(helmet({
+  contentSecurityPolicy: {
+    directives: {
+      defaultSrc: ["'self'"],
+      scriptSrc: ["'self'"],
+      styleSrc: ["'self'", "'unsafe-inline'"],
+      imgSrc: ["'self'", "data:", "blob:"],
+      connectSrc: ["'self'"],
+      fontSrc: ["'self'"],
+      objectSrc: ["'none'"],
+      frameAncestors: ["'none'"]
+    }
+  },
+  crossOriginEmbedderPolicy: false
+}));
+
+const loginLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 10,
+  message: { message: 'Слишком много попыток. Подождите минуту.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+const registerLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 5,
+  message: { message: 'Слишком много попыток регистрации. Подождите минуту.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
 
 /* ── Telegram notifications ── */
 
@@ -52,9 +90,7 @@ async function tgSend(chatId, text) {
 }
 
 function tgNotifyAdmins(text) {
-  for (const id of TG_ADMIN_IDS) {
-    tgSend(id, text);
-  }
+  for (const id of TG_ADMIN_IDS) tgSend(id, text);
 }
 
 /* ── Email ── */
@@ -95,6 +131,22 @@ const ERROR_CATEGORIES = [
   'Другое'
 ];
 
+/* ── Multer for avatars ── */
+
+const avatarStorage = multer.diskStorage({
+  destination: avatarsDir,
+  filename: (_req, _file, cb) => cb(null, `${randomUUID()}.tmp`)
+});
+
+const avatarUpload = multer({
+  storage: avatarStorage,
+  limits: { fileSize: 2 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+    cb(null, allowed.includes(file.mimetype));
+  }
+}).single('avatar');
+
 /* ── Helpers ── */
 
 app.use(express.json({ limit: '1mb' }));
@@ -114,29 +166,30 @@ async function writeJson(filePath, value) {
 
 function isValidDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }
 
-function toHour(v) {
+function toTime(v) {
   const n = Number(v);
-  return Number.isInteger(n) ? n : NaN;
+  if (isNaN(n)) return NaN;
+  if (n % 0.5 !== 0) return NaN;
+  return n;
 }
 
 function hasOverlap(a, b) {
   return a.startHour < b.endHour && b.startHour < a.endHour;
 }
 
-function generatePin(existing) {
-  let pin;
-  do { pin = String(Math.floor(1000 + Math.random() * 9000)); }
-  while (existing.has(pin));
-  return pin;
-}
+function clip(str, max) { return str.length > max ? str.slice(0, max) : str; }
 
-function isAdmin(pin) { return ADMIN_PINS.has(pin); }
+async function isAdmin(pin) {
+  if (ADMIN_PINS.has(pin)) return true;
+  const users = await readJson(FILES.users, {});
+  return !!(users[pin] && users[pin].isAdmin);
+}
 
 /* ── Auth ── */
 
-app.post('/api/auth/register', async (req, res) => {
-  const fullName = String(req.body.fullName || '').trim();
-  const contact = String(req.body.contact || '').trim();
+app.post('/api/auth/register', registerLimiter, async (req, res) => {
+  const fullName = clip(String(req.body.fullName || '').trim(), 100);
+  const contact = clip(String(req.body.contact || '').trim(), 200);
   const pin = String(req.body.pin || '').trim();
 
   if (!fullName || fullName.length < 3)
@@ -148,14 +201,14 @@ app.post('/api/auth/register', async (req, res) => {
 
   const users = await readJson(FILES.users, {});
   if (users[pin])
-    return res.status(409).json({ message: 'Этот пин-код уже занят. Придумайте другой.' });
+    return res.status(400).json({ message: 'Этот пин-код уже занят. Попробуйте другой.' });
 
   users[pin] = { id: randomUUID(), fullName, contact, createdAt: new Date().toISOString() };
   await writeJson(FILES.users, users);
   return res.status(201).json({ pin, fullName, contact });
 });
 
-app.post('/api/auth/login', async (req, res) => {
+app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   if (!/^\d{4}$/.test(pin))
     return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
@@ -164,13 +217,17 @@ app.post('/api/auth/login', async (req, res) => {
   const user = users[pin];
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
 
-  return res.json({ pin, fullName: user.fullName, contact: user.contact, admin: isAdmin(pin) });
+  return res.json({
+    pin, fullName: user.fullName, contact: user.contact,
+    position: user.position || '', userId: user.id,
+    avatar: !!user.avatar, admin: await isAdmin(pin)
+  });
 });
 
 /* ── Settings ── */
 
 app.get('/api/settings', (_req, res) => {
-  res.json({ publicBaseUrl, startHour: 8, endHour: 21, appName: 'ЛКДС — Портал сотрудника' });
+  res.json({ publicBaseUrl, startHour: 8, endHour: 21, slotStep: 0.5, appName: 'ЛКДС — Портал сотрудника' });
 });
 
 app.get('/api/crm-config', (_req, res) => {
@@ -185,6 +242,86 @@ app.get('/api/rooms', async (_req, res) => {
 
 app.get('/api/links', async (_req, res) => {
   res.json(await readJson(FILES.links, []));
+});
+
+/* ── Profile ── */
+
+app.get('/api/profile/:pin', async (req, res) => {
+  const reqPin = String(req.query.requester || '').trim();
+  if (!/^\d{4}$/.test(reqPin))
+    return res.status(401).json({ message: 'Нужна авторизация.' });
+
+  const users = await readJson(FILES.users, {});
+  if (!users[reqPin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  const targetPin = req.params.pin;
+  const user = users[targetPin];
+  if (!user) return res.status(404).json({ message: 'Пользователь не найден.' });
+
+  return res.json({
+    pin: targetPin, fullName: user.fullName, contact: user.contact,
+    position: user.position || '', avatar: !!user.avatar,
+    userId: user.id, createdAt: user.createdAt
+  });
+});
+
+app.post('/api/profile/update', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const contact = clip(String(req.body.contact || '').trim(), 200);
+  const position = clip(String(req.body.position || '').trim(), 100);
+
+  const users = await readJson(FILES.users, {});
+  if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  if (contact && contact.length >= 3) users[pin].contact = contact;
+  if (position !== undefined) users[pin].position = position;
+
+  await writeJson(FILES.users, users);
+  return res.json({ message: 'Профиль обновлён.', contact: users[pin].contact, position: users[pin].position || '' });
+});
+
+app.post('/api/profile/avatar', (req, res) => {
+  avatarUpload(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE')
+        return res.status(400).json({ message: 'Файл слишком большой (макс. 2 МБ).' });
+      return res.status(400).json({ message: 'Ошибка загрузки файла.' });
+    }
+    if (!req.file) return res.status(400).json({ message: 'Выберите изображение (JPG, PNG, WebP).' });
+
+    const pin = String(req.body.pin || '').trim();
+    const users = await readJson(FILES.users, {});
+    if (!users[pin]) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(401).json({ message: 'Неверный пин-код.' });
+    }
+
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const safeName = `${users[pin].id}${ext}`;
+    const finalPath = path.join(avatarsDir, safeName);
+
+    // Remove old avatar if exists
+    if (users[pin].avatar) {
+      await fs.unlink(path.join(avatarsDir, users[pin].avatar)).catch(() => {});
+    }
+
+    await fs.rename(req.file.path, finalPath);
+    users[pin].avatar = safeName;
+    await writeJson(FILES.users, users);
+
+    return res.json({ message: 'Фото загружено.', avatar: safeName });
+  });
+});
+
+app.get('/api/avatars/:filename', async (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(avatarsDir, filename);
+  try {
+    await fs.access(filePath);
+    res.sendFile(filePath);
+  } catch {
+    res.status(404).json({ message: 'Фото не найдено.' });
+  }
 });
 
 /* ── Bookings ── */
@@ -207,9 +344,9 @@ app.post('/api/bookings', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const roomId = String(req.body.roomId || '').trim();
   const date = String(req.body.date || '').trim();
-  const startHour = toHour(req.body.startHour);
-  const endHour = toHour(req.body.endHour);
-  const topic = String(req.body.topic || '').trim();
+  const startHour = toTime(req.body.startHour);
+  const endHour = toTime(req.body.endHour);
+  const topic = clip(String(req.body.topic || '').trim(), 300);
 
   const users = await readJson(FILES.users, {});
   const user = users[pin];
@@ -217,8 +354,8 @@ app.post('/api/bookings', async (req, res) => {
 
   if (!roomId) return res.status(400).json({ message: 'Выберите переговорку.' });
   if (!isValidDate(date)) return res.status(400).json({ message: 'Дата в формате YYYY-MM-DD.' });
-  if (!Number.isInteger(startHour) || !Number.isInteger(endHour))
-    return res.status(400).json({ message: 'Часы должны быть целыми.' });
+  if (isNaN(startHour) || isNaN(endHour))
+    return res.status(400).json({ message: 'Время должно быть кратно 30 минутам.' });
   if (startHour < 8 || endHour > 21 || startHour >= endHour)
     return res.status(400).json({ message: 'Интервал в пределах 08:00–21:00.' });
   if (!topic) return res.status(400).json({ message: 'Укажите цель встречи.' });
@@ -230,7 +367,7 @@ app.post('/api/bookings', async (req, res) => {
   const bookings = await readJson(FILES.bookings, []);
   const candidate = {
     id: randomUUID(), roomId, date, startHour, endHour,
-    fullName: user.fullName, contact: user.contact, topic,
+    pin, fullName: user.fullName, contact: user.contact, topic,
     createdAt: new Date().toISOString()
   };
 
@@ -243,17 +380,6 @@ app.post('/api/bookings', async (req, res) => {
   bookings.push(candidate);
   await writeJson(FILES.bookings, bookings);
 
-  /* TG notification */
-  const room = rooms.find((r) => r.id === roomId);
-  tgNotifyAdmins(
-    `📅 <b>Новая запись</b>\n` +
-    `Комната: ${room ? room.name : roomId}\n` +
-    `Дата: ${date}\n` +
-    `Время: ${String(startHour).padStart(2,'0')}:00–${String(endHour).padStart(2,'0')}:00\n` +
-    `Тема: ${topic}\n` +
-    `Кто: ${user.fullName} (${user.contact})`
-  );
-
   return res.status(201).json(candidate);
 });
 
@@ -264,7 +390,7 @@ app.post('/api/tickets', async (req, res) => {
   const type = String(req.body.type || '').trim();
   const module = String(req.body.module || '').trim();
   const category = String(req.body.category || '').trim();
-  const description = String(req.body.description || '').trim();
+  const description = clip(String(req.body.description || '').trim(), 2000);
 
   const users = await readJson(FILES.users, {});
   const user = users[pin];
@@ -290,7 +416,6 @@ app.post('/api/tickets', async (req, res) => {
   tickets.push(ticket);
   await writeJson(FILES.tickets, tickets);
 
-  /* TG notification */
   const label = type === 'error' ? '🐛 Ошибка' : '💡 Предложение';
   tgNotifyAdmins(
     `${label} <b>1С CRM</b>\n` +
@@ -308,7 +433,7 @@ app.post('/api/tickets', async (req, res) => {
 
 app.post('/api/suggestions', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const text = String(req.body.text || '').trim();
+  const text = clip(String(req.body.text || '').trim(), 2000);
 
   const users = await readJson(FILES.users, {});
   const user = users[pin];
@@ -324,44 +449,165 @@ app.post('/api/suggestions', async (req, res) => {
   suggestions.push(item);
   await writeJson(FILES.suggestions, suggestions);
 
-  const emailBody = `Предложение по улучшению портала ЛКДС\n\nОт: ${user.fullName}\nКонтакт: ${user.contact}\n\n${text}`;
-  sendEmail(SUGGESTION_EMAIL, `[ЛКДС] Предложение от ${user.fullName}`, emailBody);
-
-  tgNotifyAdmins(
-    `💡 <b>Идея по порталу</b>\n${text}\n\nОт: ${user.fullName} (${user.contact})`
-  );
-
   return res.status(201).json({ message: 'Спасибо за предложение!' });
 });
 
-/* ── Admin API ── */
+/* ── Admin API (POST for security — pins not in URL) ── */
 
-app.get('/api/admin/bookings', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
-  if (!isAdmin(pin)) return res.status(403).json({ message: 'Нет доступа.' });
+app.post('/api/admin/bookings', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.bookings, []));
 });
 
-app.get('/api/admin/tickets', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
-  if (!isAdmin(pin)) return res.status(403).json({ message: 'Нет доступа.' });
+app.post('/api/admin/tickets', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.tickets, []));
 });
 
-app.get('/api/admin/suggestions', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
-  if (!isAdmin(pin)) return res.status(403).json({ message: 'Нет доступа.' });
+app.post('/api/admin/suggestions', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.suggestions, []));
 });
 
-app.get('/api/admin/users', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
-  if (!isAdmin(pin)) return res.status(403).json({ message: 'Нет доступа.' });
+app.post('/api/admin/users', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   const users = await readJson(FILES.users, {});
-  const list = Object.entries(users).map(([p, u]) => ({
-    pin: p, fullName: u.fullName, contact: u.contact, createdAt: u.createdAt
-  }));
+  const list = [];
+  for (const [p, u] of Object.entries(users)) {
+    list.push({
+      pin: p, fullName: u.fullName, contact: u.contact,
+      position: u.position || '', avatar: !!u.avatar,
+      isAdmin: ADMIN_PINS.has(p) || !!u.isAdmin, createdAt: u.createdAt
+    });
+  }
   return res.json(list);
+});
+
+app.post('/api/admin/update-user', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const targetPin = String(req.body.targetPin || '').trim();
+  const fullName = clip(String(req.body.fullName || '').trim(), 100);
+  const contact = clip(String(req.body.contact || '').trim(), 200);
+  const newPin = String(req.body.newPin || '').trim();
+
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
+
+  const users = await readJson(FILES.users, {});
+  if (!users[targetPin]) return res.status(404).json({ message: 'Пользователь не найден.' });
+
+  if (fullName && fullName.length >= 3) users[targetPin].fullName = fullName;
+  else if (fullName) return res.status(400).json({ message: 'ФИО минимум 3 символа.' });
+
+  if (contact && contact.length >= 3) users[targetPin].contact = contact;
+  else if (contact) return res.status(400).json({ message: 'Контакт минимум 3 символа.' });
+
+  if (newPin && newPin !== targetPin) {
+    if (!/^\d{4}$/.test(newPin))
+      return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
+    if (users[newPin])
+      return res.status(400).json({ message: 'Этот пин-код уже занят.' });
+    users[newPin] = users[targetPin];
+    delete users[targetPin];
+    const bookings = await readJson(FILES.bookings, []);
+    let changed = false;
+    for (const b of bookings) {
+      if (b.pin === targetPin) { b.pin = newPin; changed = true; }
+    }
+    if (changed) await writeJson(FILES.bookings, bookings);
+  }
+
+  await writeJson(FILES.users, users);
+  return res.json({ message: 'Данные обновлены.' });
+});
+
+app.post('/api/admin/toggle-admin', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const targetPin = String(req.body.targetPin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
+
+  const users = await readJson(FILES.users, {});
+  if (!users[targetPin]) return res.status(404).json({ message: 'Пользователь не найден.' });
+
+  users[targetPin].isAdmin = !users[targetPin].isAdmin;
+  await writeJson(FILES.users, users);
+  return res.json({ pin: targetPin, isAdmin: !!users[targetPin].isAdmin });
+});
+
+/* ── Booking cancel ── */
+
+app.delete('/api/bookings/:id', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  const users = await readJson(FILES.users, {});
+  const user = users[pin];
+  if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  const bookings = await readJson(FILES.bookings, []);
+  const idx = bookings.findIndex((b) => b.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
+
+  const admin = await isAdmin(pin);
+  if (!admin && bookings[idx].pin !== pin && bookings[idx].fullName !== user.fullName)
+    return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
+
+  bookings.splice(idx, 1);
+  await writeJson(FILES.bookings, bookings);
+  return res.json({ message: 'Бронирование отменено.' });
+});
+
+app.patch('/api/bookings/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const cancelHour = toTime(req.body.cancelHour);
+
+  const users = await readJson(FILES.users, {});
+  const user = users[pin];
+  if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  const bookings = await readJson(FILES.bookings, []);
+  const idx = bookings.findIndex((b) => b.id === req.params.id);
+  if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
+
+  const booking = bookings[idx];
+
+  const admin = await isAdmin(pin);
+  if (!admin && booking.pin !== pin && booking.fullName !== user.fullName)
+    return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
+
+  if (isNaN(cancelHour) || cancelHour < booking.startHour || cancelHour >= booking.endHour)
+    return res.status(400).json({ message: 'Указанный слот не входит в это бронирование.' });
+
+  const step = 0.5;
+
+  if (booking.endHour - booking.startHour <= step) {
+    bookings.splice(idx, 1);
+  } else if (cancelHour === booking.startHour) {
+    booking.startHour = booking.startHour + step;
+  } else if (cancelHour === booking.endHour - step) {
+    booking.endHour = booking.endHour - step;
+  } else {
+    const secondBooking = {
+      id: randomUUID(),
+      roomId: booking.roomId,
+      date: booking.date,
+      startHour: cancelHour + step,
+      endHour: booking.endHour,
+      pin: booking.pin,
+      fullName: booking.fullName,
+      contact: booking.contact,
+      topic: booking.topic,
+      createdAt: booking.createdAt
+    };
+    booking.endHour = cancelHour;
+    bookings.push(secondBooking);
+  }
+
+  await writeJson(FILES.bookings, bookings);
+  return res.json({ message: 'Слот отменён.' });
 });
 
 /* ── SPA fallback ── */

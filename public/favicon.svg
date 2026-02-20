@@ -1,0 +1,11 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 32 32">
+  <rect width="32" height="32" rx="8" fill="#0e2156"/>
+  <rect x="4" y="10" width="12" height="10" rx="2" fill="#1172b6"/>
+  <rect x="18" y="10" width="10" height="10" rx="2" fill="#38a169"/>
+  <circle cx="8" cy="23" r="2.5" fill="#e2e8f0"/>
+  <circle cx="14" cy="23" r="2.5" fill="#e2e8f0"/>
+  <circle cx="22" cy="23" r="2.5" fill="#e2e8f0"/>
+  <circle cx="28" cy="23" r="2.5" fill="#e2e8f0"/>
+  <rect x="2" y="26" width="28" height="2" rx="1" fill="#4a5568"/>
+  <text x="16" y="9" font-size="6" fill="#fff" text-anchor="middle" font-family="sans-serif" font-weight="bold">ЛКДС</text>
+</svg>

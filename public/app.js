@@ -3,8 +3,11 @@ const ICONS = {
   headset: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M3 18v-6a9 9 0 0 1 18 0v6"/><path d="M21 19a2 2 0 0 1-2 2h-1a2 2 0 0 1-2-2v-3a2 2 0 0 1 2-2h3zM3 19a2 2 0 0 0 2 2h1a2 2 0 0 0 2-2v-3a2 2 0 0 0-2-2H3z"/></svg>',
   chat: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>',
   globe: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="2" y1="12" x2="22" y2="12"/><path d="M12 2a15.3 15.3 0 0 1 4 10 15.3 15.3 0 0 1-4 10 15.3 15.3 0 0 1-4-10 15.3 15.3 0 0 1 4-10z"/></svg>',
-  arrow: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>'
+  arrow: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><polyline points="9 18 15 12 9 6"/></svg>',
+  user: '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M20 21v-2a4 4 0 0 0-4-4H8a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>'
 };
+
+const DEFAULT_AVATAR = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 80 80" fill="none"><rect width="80" height="80" rx="40" fill="%23e2e8f0"/><circle cx="40" cy="30" r="14" fill="%23a0aec0"/><path d="M12 72c0-15.46 12.54-28 28-28s28 12.54 28 28" fill="%23a0aec0"/></svg>');
 
 /* ── DOM ── */
 const $ = (id) => document.getElementById(id);
@@ -17,6 +20,8 @@ const loginMessage = $('loginMessage');
 const registerForm = $('registerForm');
 const registerMessage = $('registerMessage');
 const userGreeting = $('userGreeting');
+const topbarUser = $('topbarUser');
+const topbarAvatar = $('topbarAvatar');
 const logoutBtn = $('logoutBtn');
 const adminBtn = $('adminBtn');
 
@@ -46,6 +51,43 @@ const suggestForm = $('suggestForm');
 const suggestCancel = $('suggestCancel');
 const suggestMessage = $('suggestMessage');
 
+const cancelPopup = $('cancelPopup');
+const cancelPopupInfo = $('cancelPopupInfo');
+const cancelEntireBtn = $('cancelEntireBtn');
+const cancelSlotBtn = $('cancelSlotBtn');
+const cancelDismissBtn = $('cancelDismissBtn');
+const cancelPopupMessage = $('cancelPopupMessage');
+
+const editUserPopup = $('editUserPopup');
+const editUserForm = $('editUserForm');
+const editUserOriginalPin = $('editUserOriginalPin');
+const editUserName = $('editUserName');
+const editUserContact = $('editUserContact');
+const editUserPin = $('editUserPin');
+const editUserCancel = $('editUserCancel');
+const editUserMessage = $('editUserMessage');
+
+const profilePopup = $('profilePopup');
+const profileTitle = $('profileTitle');
+const profileAvatar = $('profileAvatar');
+const profileAvatarUploadZone = $('profileAvatarUploadZone');
+const profileAvatarInput = $('profileAvatarInput');
+const avatarUploadContent = $('avatarUploadContent');
+const avatarUploadProgress = $('avatarUploadProgress');
+const avatarProgressFill = $('avatarProgressFill');
+const avatarProgressText = $('avatarProgressText');
+const avatarUploadMessage = $('avatarUploadMessage');
+const profileName = $('profileName');
+const profilePosition = $('profilePosition');
+const profilePositionField = $('profilePositionField');
+const profileContact = $('profileContact');
+const profileContactField = $('profileContactField');
+const profileDate = $('profileDate');
+const profileSaveBtn = $('profileSaveBtn');
+const profileCloseBtn = $('profileCloseBtn');
+const profileMessage = $('profileMessage');
+const profileActions = $('profileActions');
+
 const linksGrid = $('linksGrid');
 const adminContent = $('adminContent');
 
@@ -53,8 +95,9 @@ const adminContent = $('adminContent');
 const state = {
   pin: null,
   user: null,
+  userId: null,
   isAdmin: false,
-  settings: { startHour: 8, endHour: 21 },
+  settings: { startHour: 8, endHour: 21, slotStep: 0.5 },
   rooms: [],
   bookings: [],
   crmConfig: { modules: [], errorCategories: [] }
@@ -88,6 +131,12 @@ async function api(url, opts = {}) {
 function show(el) { el.classList.remove('hidden'); }
 function hide(el) { el.classList.add('hidden'); }
 function pad(n) { return String(n).padStart(2, '0'); }
+function fmtTime(t) { const h = Math.floor(t); const m = (t % 1) ? '30' : '00'; return `${pad(h)}:${m}`; }
+
+function avatarUrl(userId, hasAvatar) {
+  if (!hasAvatar || !userId) return DEFAULT_AVATAR;
+  return `/api/avatars/${userId}.jpg?t=${Date.now()}`;
+}
 
 /* ── Tabs ── */
 
@@ -112,8 +161,10 @@ async function tryAutoLogin() {
       body: JSON.stringify({ pin: saved })
     });
     state.pin = data.pin;
-    state.user = { fullName: data.fullName, contact: data.contact };
+    state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '' };
+    state.userId = data.userId;
     state.isAdmin = !!data.admin;
+    state.hasAvatar = !!data.avatar;
     return true;
   } catch {
     localStorage.removeItem('lkds_pin');
@@ -125,6 +176,8 @@ function showMain() {
   hide(authScreen);
   show(mainScreen);
   userGreeting.textContent = state.user.fullName;
+  topbarAvatar.src = avatarUrl(state.userId, state.hasAvatar);
+  topbarAvatar.alt = state.user.fullName;
   if (state.isAdmin) show(adminBtn);
   else hide(adminBtn);
 }
@@ -134,6 +187,7 @@ function showAuth() {
   hide(mainScreen);
   state.pin = null;
   state.user = null;
+  state.userId = null;
   state.isAdmin = false;
 }
 
@@ -147,8 +201,10 @@ loginForm.addEventListener('submit', async (e) => {
       body: JSON.stringify({ pin: pinInput.value.trim() })
     });
     state.pin = data.pin;
-    state.user = { fullName: data.fullName, contact: data.contact };
+    state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '' };
+    state.userId = data.userId;
     state.isAdmin = !!data.admin;
+    state.hasAvatar = !!data.avatar;
     localStorage.setItem('lkds_pin', data.pin);
     showMain();
     await loadApp();
@@ -168,8 +224,9 @@ registerForm.addEventListener('submit', async (e) => {
       body: JSON.stringify(Object.fromEntries(fd.entries()))
     });
     state.pin = data.pin;
-    state.user = { fullName: data.fullName, contact: data.contact };
+    state.user = { fullName: data.fullName, contact: data.contact, position: '' };
     state.isAdmin = false;
+    state.hasAvatar = false;
     localStorage.setItem('lkds_pin', data.pin);
     msg(registerMessage, 'Регистрация прошла успешно!', 'success');
     registerForm.reset();
@@ -242,25 +299,32 @@ async function loadBookings() {
 }
 
 function renderSchedule() {
-  const { startHour, endHour } = state.settings;
+  const { startHour, endHour, slotStep } = state.settings;
+  const step = slotStep || 0.5;
   let html = '';
-  for (let h = startHour; h < endHour; h++) {
-    const label = `${pad(h)}:00 – ${pad(h+1)}:00`;
-    const bk = state.bookings.find((b) => b.startHour <= h && b.endHour > h);
+  for (let t = startHour; t < endHour; t += step) {
+    const label = `${fmtTime(t)} – ${fmtTime(t + step)}`;
+    const bk = state.bookings.find((b) => b.startHour <= t && b.endHour > t);
     if (bk) {
-      const isFirst = bk.startHour === h;
-      const span = isFirst ? `${pad(bk.startHour)}:00–${pad(bk.endHour)}:00` : '';
+      const isFirst = bk.startHour === t;
+      const span = isFirst ? `${fmtTime(bk.startHour)}–${fmtTime(bk.endHour)}` : '';
+      const isOwn = bk.fullName === state.user.fullName;
+      const cancelBtn = (isOwn || state.isAdmin)
+        ? ` <button class="btn-cancel-slot" data-bid="${bk.id}" data-hour="${t}" title="Отменить">✕</button>` : '';
       html += `<div class="slot-row">
         <div class="slot-time">${label}</div>
         <div class="slot-status busy">
-          ${esc(bk.topic)}
-          <span class="slot-info">${esc(bk.fullName)} · ${esc(bk.contact)}${span ? ' · ' + span : ''}</span>
+          ${esc(bk.topic)}${cancelBtn}
+          <span class="slot-info">
+            <a href="#" class="slot-profile-link" data-pin="${esc(bk.pin)}">${esc(bk.fullName)}</a>
+            · ${esc(bk.contact)}${span ? ' · ' + span : ''}
+          </span>
         </div>
       </div>`;
     } else {
       html += `<div class="slot-row">
         <div class="slot-time">${label}</div>
-        <div class="slot-status free clickable" data-hour="${h}">Свободно</div>
+        <div class="slot-status free clickable" data-hour="${t}">Свободно</div>
       </div>`;
     }
   }
@@ -268,30 +332,38 @@ function renderSchedule() {
   scheduleGrid.querySelectorAll('.clickable').forEach((el) => {
     el.addEventListener('click', () => openBookingPopup(Number(el.dataset.hour)));
   });
+  scheduleGrid.querySelectorAll('.btn-cancel-slot').forEach((el) => {
+    el.addEventListener('click', (e) => { e.stopPropagation(); cancelBooking(el.dataset.bid, Number(el.dataset.hour)); });
+  });
+  scheduleGrid.querySelectorAll('.slot-profile-link').forEach((el) => {
+    el.addEventListener('click', (e) => { e.preventDefault(); openProfile(el.dataset.pin); });
+  });
 }
 
 /* ── Booking popup ── */
 
-function getMaxEndHour(from) {
-  const { endHour } = state.settings;
-  for (let h = from + 1; h <= endHour; h++) {
-    if (state.bookings.some((b) => b.startHour < h && b.endHour > h - 1 && b.startHour !== from)) {
-      return h > from + 1 ? h : from + 1;
+function getMaxEnd(from) {
+  const { endHour, slotStep } = state.settings;
+  const step = slotStep || 0.5;
+  for (let t = from + step; t <= endHour; t += step) {
+    if (state.bookings.some((b) => b.startHour < t && b.endHour > t - step && b.startHour !== from)) {
+      return t > from + step ? t : from + step;
     }
   }
   return endHour;
 }
 
-function openBookingPopup(hour) {
-  const maxEnd = getMaxEndHour(hour);
-  popupStartHour.innerHTML = `<option value="${hour}">${pad(hour)}:00</option>`;
+function openBookingPopup(from) {
+  const step = state.settings.slotStep || 0.5;
+  const maxEnd = getMaxEnd(from);
+  popupStartHour.innerHTML = `<option value="${from}">${fmtTime(from)}</option>`;
   let opts = '';
-  for (let h = hour + 1; h <= maxEnd; h++) {
-    const isBusy = state.bookings.some((b) => b.startHour < h && b.endHour > h - 1);
+  for (let t = from + step; t <= maxEnd; t += step) {
+    const isBusy = state.bookings.some((b) => b.startHour < t && b.endHour > t - step);
     if (isBusy) break;
-    opts += `<option value="${h}">${pad(h)}:00</option>`;
+    opts += `<option value="${t}">${fmtTime(t)}</option>`;
   }
-  if (!opts) opts = `<option value="${hour+1}">${pad(hour+1)}:00</option>`;
+  if (!opts) opts = `<option value="${from + step}">${fmtTime(from + step)}</option>`;
   popupEndHour.innerHTML = opts;
   popupBookingForm.reset();
   popupBookingForm.topic.value = '';
@@ -330,6 +402,69 @@ refreshBtn.addEventListener('click', () => loadBookings().catch((e) => msg(booki
 roomSelect.addEventListener('change', () => loadBookings().catch((e) => msg(bookingMessage, e.message, 'error')));
 dateInput.addEventListener('change', () => loadBookings().catch((e) => msg(bookingMessage, e.message, 'error')));
 
+/* ── Cancel booking ── */
+
+function cancelBooking(bookingId, slotHour) {
+  const booking = state.bookings.find((b) => b.id === bookingId);
+  if (!booking) return;
+
+  const step = state.settings.slotStep || 0.5;
+  const slotCount = (booking.endHour - booking.startHour) / step;
+
+  if (slotCount <= 1 || isNaN(slotHour)) {
+    if (!confirm('Отменить бронирование?')) return;
+    doFullCancel(bookingId);
+    return;
+  }
+
+  const bookingRange = `${fmtTime(booking.startHour)}–${fmtTime(booking.endHour)}`;
+  const slotRange = `${fmtTime(slotHour)}–${fmtTime(slotHour + step)}`;
+
+  cancelPopupInfo.innerHTML =
+    `Бронирование: <strong>${esc(booking.topic)}</strong> (${bookingRange})<br>` +
+    `Выбранный слот: <strong>${slotRange}</strong>`;
+
+  cancelPopup._bookingId = bookingId;
+  cancelPopup._slotHour = slotHour;
+  msg(cancelPopupMessage, '');
+
+  cancelEntireBtn.textContent = `Отменить всё (${bookingRange})`;
+  cancelSlotBtn.textContent = `Отменить только ${slotRange}`;
+
+  show(cancelPopup);
+}
+
+async function doFullCancel(bookingId) {
+  try {
+    await api(`/api/bookings/${bookingId}?pin=${encodeURIComponent(state.pin)}`, { method: 'DELETE' });
+    msg(bookingMessage, 'Бронирование отменено.', 'success');
+    hide(cancelPopup);
+    await loadBookings();
+  } catch (err) {
+    msg(cancelPopupMessage, err.message, 'error');
+  }
+}
+
+async function doSlotCancel(bookingId, slotHour) {
+  try {
+    await api(`/api/bookings/${bookingId}`, {
+      method: 'PATCH',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, cancelHour: slotHour })
+    });
+    msg(bookingMessage, 'Слот отменён.', 'success');
+    hide(cancelPopup);
+    await loadBookings();
+  } catch (err) {
+    msg(cancelPopupMessage, err.message, 'error');
+  }
+}
+
+cancelEntireBtn.addEventListener('click', () => doFullCancel(cancelPopup._bookingId));
+cancelSlotBtn.addEventListener('click', () => doSlotCancel(cancelPopup._bookingId, cancelPopup._slotHour));
+cancelDismissBtn.addEventListener('click', () => hide(cancelPopup));
+cancelPopup.addEventListener('click', (e) => { if (e.target === cancelPopup) hide(cancelPopup); });
+
 /* ── Suggest popup ── */
 
 suggestBtn.addEventListener('click', () => { suggestForm.reset(); msg(suggestMessage, ''); show(suggestPopup); });
@@ -351,6 +486,156 @@ suggestForm.addEventListener('submit', async (e) => {
   } catch (err) {
     msg(suggestMessage, err.message, 'error');
   }
+});
+
+/* ── Profile popup ── */
+
+let profileViewPin = null;
+
+topbarUser.addEventListener('click', () => openProfile(state.pin));
+
+async function openProfile(pin) {
+  profileViewPin = pin;
+  const isOwn = pin === state.pin;
+  msg(profileMessage, '');
+
+  try {
+    const data = await api(`/api/profile/${pin}?requester=${encodeURIComponent(state.pin)}`);
+
+    profileTitle.textContent = isOwn ? 'Мой профиль' : 'Профиль';
+    profileName.textContent = data.fullName;
+    profileAvatar.src = avatarUrl(data.userId, data.avatar);
+    profilePosition.value = data.position || '';
+    profileContact.value = data.contact || '';
+    profileDate.textContent = fmtDate(data.createdAt);
+
+    msg(avatarUploadMessage, '');
+    hide(avatarUploadProgress);
+    show(avatarUploadContent);
+    avatarProgressFill.style.width = '0%';
+
+    if (isOwn) {
+      show(profileAvatarUploadZone);
+      show(profileSaveBtn);
+      profilePosition.removeAttribute('readonly');
+      profileContact.removeAttribute('readonly');
+    } else {
+      hide(profileAvatarUploadZone);
+      hide(profileSaveBtn);
+      profilePosition.setAttribute('readonly', '');
+      profileContact.setAttribute('readonly', '');
+    }
+
+    show(profilePopup);
+  } catch (err) {
+    alert(err.message);
+  }
+}
+
+profileCloseBtn.addEventListener('click', () => hide(profilePopup));
+profilePopup.addEventListener('click', (e) => { if (e.target === profilePopup) hide(profilePopup); });
+
+profileSaveBtn.addEventListener('click', async () => {
+  msg(profileMessage, '');
+  try {
+    const result = await api('/api/profile/update', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pin: state.pin,
+        contact: profileContact.value.trim(),
+        position: profilePosition.value.trim()
+      })
+    });
+    state.user.contact = result.contact;
+    state.user.position = result.position;
+    msg(profileMessage, result.message, 'success');
+  } catch (err) {
+    msg(profileMessage, err.message, 'error');
+  }
+});
+
+/* ── Avatar upload with drag&drop and progress ── */
+
+function uploadAvatar(file) {
+  if (!file) return;
+
+  // Validate on client side
+  const allowed = ['image/jpeg', 'image/png', 'image/webp'];
+  if (!allowed.includes(file.type)) {
+    msg(avatarUploadMessage, 'Формат не поддерживается. Используйте JPG, PNG или WebP.', 'error');
+    return;
+  }
+  if (file.size > 2 * 1024 * 1024) {
+    msg(avatarUploadMessage, `Файл слишком большой (${(file.size / 1024 / 1024).toFixed(1)} МБ). Максимум 2 МБ.`, 'error');
+    return;
+  }
+
+  msg(avatarUploadMessage, '');
+  hide(avatarUploadContent);
+  show(avatarUploadProgress);
+  avatarProgressFill.style.width = '0%';
+  avatarProgressText.textContent = 'Загрузка...';
+
+  const fd = new FormData();
+  fd.append('avatar', file);
+  fd.append('pin', state.pin);
+
+  const xhr = new XMLHttpRequest();
+
+  xhr.upload.addEventListener('progress', (e) => {
+    if (e.lengthComputable) {
+      const pct = Math.round((e.loaded / e.total) * 100);
+      avatarProgressFill.style.width = pct + '%';
+      avatarProgressText.textContent = `Загрузка... ${pct}%`;
+    }
+  });
+
+  xhr.addEventListener('load', () => {
+    hide(avatarUploadProgress);
+    show(avatarUploadContent);
+    avatarProgressFill.style.width = '0%';
+
+    try {
+      const result = JSON.parse(xhr.responseText);
+      if (xhr.status >= 200 && xhr.status < 300) {
+        state.hasAvatar = true;
+        const newUrl = `/api/avatars/${result.avatar}?t=${Date.now()}`;
+        profileAvatar.src = newUrl;
+        topbarAvatar.src = newUrl;
+        msg(avatarUploadMessage, 'Фото загружено!', 'success');
+      } else {
+        msg(avatarUploadMessage, result.message || 'Ошибка загрузки.', 'error');
+      }
+    } catch {
+      msg(avatarUploadMessage, 'Ошибка загрузки файла.', 'error');
+    }
+  });
+
+  xhr.addEventListener('error', () => {
+    hide(avatarUploadProgress);
+    show(avatarUploadContent);
+    msg(avatarUploadMessage, 'Сетевая ошибка. Проверьте подключение.', 'error');
+  });
+
+  xhr.open('POST', '/api/profile/avatar');
+  xhr.send(fd);
+}
+
+profileAvatarInput.addEventListener('change', () => {
+  uploadAvatar(profileAvatarInput.files[0]);
+  profileAvatarInput.value = '';
+});
+
+// Drag & drop
+profileAvatarUploadZone.addEventListener('dragenter', (e) => { e.preventDefault(); profileAvatarUploadZone.classList.add('dragover'); });
+profileAvatarUploadZone.addEventListener('dragover', (e) => { e.preventDefault(); profileAvatarUploadZone.classList.add('dragover'); });
+profileAvatarUploadZone.addEventListener('dragleave', () => { profileAvatarUploadZone.classList.remove('dragover'); });
+profileAvatarUploadZone.addEventListener('drop', (e) => {
+  e.preventDefault();
+  profileAvatarUploadZone.classList.remove('dragover');
+  const file = e.dataTransfer.files[0];
+  if (file) uploadAvatar(file);
 });
 
 /* ── CRM Tickets ── */
@@ -388,7 +673,6 @@ ticketForm.addEventListener('submit', async (e) => {
 /* ── Admin panel ── */
 
 adminBtn.addEventListener('click', () => {
-  /* switch to admin tab */
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
   $('panelAdmin').classList.add('active');
@@ -405,7 +689,11 @@ document.querySelectorAll('.admin-tab').forEach((tab) => {
 
 async function loadAdminData(type) {
   try {
-    const data = await api(`/api/admin/${type}?pin=${encodeURIComponent(state.pin)}`);
+    const data = await api(`/api/admin/${type}`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
     renderAdminTable(type, data);
   } catch (err) {
     adminContent.innerHTML = `<p class="message error">${esc(err.message)}</p>`;
@@ -427,14 +715,15 @@ function renderAdminTable(type, data) {
   let html = '<table class="admin-table">';
 
   if (type === 'bookings') {
-    html += '<tr><th>Дата</th><th>Время</th><th>Тема</th><th>Кто</th><th>Контакт</th></tr>';
+    html += '<tr><th>Дата</th><th>Время</th><th>Тема</th><th>Кто</th><th>Контакт</th><th></th></tr>';
     for (const b of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
       html += `<tr>
         <td>${esc(b.date)}</td>
-        <td>${pad(b.startHour)}:00–${pad(b.endHour)}:00</td>
+        <td style="white-space:nowrap">${fmtTime(b.startHour)}–${fmtTime(b.endHour)}</td>
         <td>${esc(b.topic)}</td>
         <td>${esc(b.fullName)}</td>
         <td>${esc(b.contact)}</td>
+        <td><button class="btn-cancel-sm" onclick="window._cancelAdminBooking('${b.id}')">Отменить</button></td>
       </tr>`;
     }
   } else if (type === 'tickets') {
@@ -461,13 +750,17 @@ function renderAdminTable(type, data) {
       </tr>`;
     }
   } else if (type === 'users') {
-    html += '<tr><th>Пин</th><th>ФИО</th><th>Контакт</th><th>Дата регистрации</th></tr>';
+    html += '<tr><th>Пин</th><th>ФИО</th><th>Контакт</th><th>Админ</th><th>Дата</th><th></th></tr>';
     for (const u of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+      const adminLabel = u.isAdmin ? 'Да' : 'Нет';
+      const adminClass = u.isAdmin ? 'btn-toggle-admin active' : 'btn-toggle-admin';
       html += `<tr>
         <td>${esc(u.pin)}</td>
         <td>${esc(u.fullName)}</td>
         <td>${esc(u.contact)}</td>
+        <td><button class="${adminClass}" onclick="window._toggleAdmin('${esc(u.pin)}')">${adminLabel}</button></td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
+        <td><button class="btn-edit-user" onclick="window._editUser('${esc(u.pin)}','${esc(u.fullName).replace(/'/g,"\\'")}','${esc(u.contact).replace(/'/g,"\\'")}')">Ред.</button></td>
       </tr>`;
     }
   }
@@ -475,6 +768,65 @@ function renderAdminTable(type, data) {
   html += '</table>';
   adminContent.innerHTML = html;
 }
+
+window._cancelAdminBooking = async (id) => {
+  if (!confirm('Отменить бронирование?')) return;
+  try {
+    await api(`/api/bookings/${id}?pin=${encodeURIComponent(state.pin)}`, { method: 'DELETE' });
+    loadAdminData('bookings');
+  } catch (err) {
+    alert(err.message);
+  }
+};
+
+window._toggleAdmin = async (targetPin) => {
+  try {
+    await api('/api/admin/toggle-admin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, targetPin })
+    });
+    loadAdminData('users');
+  } catch (err) {
+    alert(err.message);
+  }
+};
+
+/* ── Edit user popup (admin) ── */
+
+window._editUser = (pin, name, contact) => {
+  editUserOriginalPin.value = pin;
+  editUserName.value = name;
+  editUserContact.value = contact;
+  editUserPin.value = pin;
+  msg(editUserMessage, '');
+  show(editUserPopup);
+};
+
+editUserCancel.addEventListener('click', () => hide(editUserPopup));
+editUserPopup.addEventListener('click', (e) => { if (e.target === editUserPopup) hide(editUserPopup); });
+
+editUserForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  msg(editUserMessage, '');
+  try {
+    const result = await api('/api/admin/update-user', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        pin: state.pin,
+        targetPin: editUserOriginalPin.value,
+        fullName: editUserName.value.trim(),
+        contact: editUserContact.value.trim(),
+        newPin: editUserPin.value.trim()
+      })
+    });
+    msg(editUserMessage, result.message, 'success');
+    setTimeout(() => { hide(editUserPopup); loadAdminData('users'); }, 800);
+  } catch (err) {
+    msg(editUserMessage, err.message, 'error');
+  }
+});
 
 /* ── Init ── */
 

@@ -8,18 +8,10 @@
     "disabled": false
   },
   {
-    "id": "max-group",
-    "title": "Общая группа Max",
-    "desc": "В разработке",
-    "url": "#",
-    "icon": "chat",
-    "disabled": true
-  },
-  {
-    "id": "corp-portal",
-    "title": "Корпоративный портал",
-    "desc": "dxlc.ru",
-    "url": "https://dxlc.ru/",
+    "id": "corp-alabuga",
+    "title": "Корп Алабуга",
+    "desc": "corp.alabuga.ru",
+    "url": "https://corp.alabuga.ru/",
     "icon": "globe",
     "disabled": false
   }
