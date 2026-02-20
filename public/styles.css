@@ -416,6 +416,13 @@ button{
 }
 .admin-tab:hover{color:var(--text)}
 .admin-tab.active{color:var(--accent);border-bottom-color:var(--accent)}
+.admin-tab{position:relative}
+.badge-count{
+  display:inline-block;background:var(--danger);color:#fff;
+  font-size:10px;font-weight:700;min-width:16px;height:16px;
+  line-height:16px;text-align:center;border-radius:8px;
+  padding:0 4px;margin-left:4px;vertical-align:top;
+}
 
 .admin-content{overflow-x:auto}
 

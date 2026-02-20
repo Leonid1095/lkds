@@ -33,7 +33,8 @@ const FILES = {
   bookings: path.join(dataDir, 'bookings.json'),
   users: path.join(dataDir, 'users.json'),
   tickets: path.join(dataDir, 'tickets.json'),
-  suggestions: path.join(dataDir, 'suggestions.json')
+  suggestions: path.join(dataDir, 'suggestions.json'),
+  pinRequests: path.join(dataDir, 'pin-requests.json')
 };
 
 /* ── Security middleware ── */
@@ -235,12 +236,12 @@ app.post('/api/auth/forgot-pin', loginLimiter, async (req, res) => {
   if (!contact || contact.length < 3)
     return res.status(400).json({ message: 'Укажите контакт для связи.' });
 
-  tgNotifyAdmins(
-    `🔑 <b>Запрос восстановления пин-кода</b>\n` +
-    `ФИО: ${fullName}\n` +
-    `Контакт: ${contact}\n` +
-    `Время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`
-  );
+  const requests = await readJson(FILES.pinRequests, []);
+  requests.push({
+    id: randomUUID(), fullName, contact,
+    createdAt: new Date().toISOString()
+  });
+  await writeJson(FILES.pinRequests, requests);
 
   return res.json({ message: 'Запрос отправлен администратору. Ожидайте — с вами свяжутся.' });
 });
@@ -491,6 +492,26 @@ app.post('/api/admin/suggestions', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.suggestions, []));
+});
+
+app.post('/api/admin/pin-requests', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  return res.json(await readJson(FILES.pinRequests, []));
+});
+
+app.post('/api/admin/pin-request-resolve', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const requestId = String(req.body.requestId || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const requests = await readJson(FILES.pinRequests, []);
+  const idx = requests.findIndex((r) => r.id === requestId);
+  if (idx === -1) return res.status(404).json({ message: 'Запрос не найден.' });
+
+  requests.splice(idx, 1);
+  await writeJson(FILES.pinRequests, requests);
+  return res.json({ message: 'Запрос закрыт.' });
 });
 
 app.post('/api/admin/users', async (req, res) => {

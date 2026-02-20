@@ -176,7 +176,7 @@ function showMain() {
   userGreeting.textContent = state.user.fullName;
   topbarAvatar.src = avatarUrl(state.userId, state.hasAvatar);
   topbarAvatar.alt = state.user.fullName;
-  if (state.isAdmin) show(adminBtn);
+  if (state.isAdmin) { show(adminBtn); updatePinBadge(); }
   else hide(adminBtn);
 }
 
@@ -700,11 +700,30 @@ ticketForm.addEventListener('submit', async (e) => {
 
 /* ── Admin panel ── */
 
+const pinRequestsBadge = $('pinRequestsBadge');
+
+async function updatePinBadge() {
+  try {
+    const data = await api('/api/admin/pin-requests', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
+    if (data.length > 0) {
+      pinRequestsBadge.textContent = data.length;
+      show(pinRequestsBadge);
+    } else {
+      hide(pinRequestsBadge);
+    }
+  } catch { hide(pinRequestsBadge); }
+}
+
 adminBtn.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
   $('panelAdmin').classList.add('active');
   loadAdminData('bookings');
+  updatePinBadge();
 });
 
 document.querySelectorAll('.admin-tab').forEach((tab) => {
@@ -795,6 +814,16 @@ function renderAdminTable(type, data) {
         <td><button class="btn-edit-user" data-action="edit-user" data-pin="${esc(u.pin)}">Ред.</button></td>
       </tr>`;
     }
+  } else if (type === 'pin-requests') {
+    html += '<tr><th>Дата</th><th>ФИО</th><th>Контакт</th><th></th></tr>';
+    for (const r of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+      html += `<tr>
+        <td style="white-space:nowrap">${fmtDate(r.createdAt)}</td>
+        <td>${esc(r.fullName)}</td>
+        <td>${esc(r.contact)}</td>
+        <td><button class="btn-cancel-sm" data-action="resolve-pin" data-id="${esc(r.id)}">Готово</button></td>
+      </tr>`;
+    }
   }
 
   html += '</table>';
@@ -825,6 +854,17 @@ async function handleAdminAction(e) {
         body: JSON.stringify({ pin: state.pin, targetPin: btn.dataset.pin })
       });
       loadAdminData('users');
+    } catch (err) { alert(err.message); }
+
+  } else if (action === 'resolve-pin') {
+    try {
+      await api('/api/admin/pin-request-resolve', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin, requestId: btn.dataset.id })
+      });
+      loadAdminData('pin-requests');
+      updatePinBadge();
     } catch (err) { alert(err.message); }
 
   } else if (action === 'edit-user') {
