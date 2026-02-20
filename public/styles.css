@@ -99,6 +99,25 @@ details[open] summary{margin-bottom:12px}
   margin-top:-2px;opacity:.8;
 }
 
+/* ── Forgot PIN ── */
+
+.btn-forgot-pin{
+  background:none;border:none;cursor:pointer;
+  color:var(--accent);font-size:13px;
+  margin-top:4px;padding:4px 0;
+  text-decoration:underline;text-underline-offset:2px;
+}
+.btn-forgot-pin:hover{color:var(--primary-hover)}
+
+.forgot-pin-form{
+  margin-top:12px;display:flex;flex-direction:column;gap:10px;
+  padding:12px;border:1px solid var(--border);border-radius:8px;
+  background:var(--accent-soft);
+}
+.forgot-pin-desc{
+  font-size:13px;color:var(--text-sec);margin:0;
+}
+
 /* ── Topbar ── */
 
 .topbar{

@@ -69,6 +69,22 @@
           <p id="loginMessage" class="message"></p>
         </form>
 
+        <button type="button" id="forgotPinBtn" class="btn-forgot-pin">Забыл пин-код</button>
+
+        <div id="forgotPinForm" class="forgot-pin-form hidden">
+          <p class="forgot-pin-desc">Укажите ваше ФИО — администратор свяжется с вами и сообщит пин-код.</p>
+          <label>
+            ФИО
+            <input id="forgotPinName" placeholder="Иванов Иван Иванович" required />
+          </label>
+          <label>
+            Контакт для связи
+            <input id="forgotPinContact" placeholder="+7 999 123-45-67" required />
+          </label>
+          <button type="button" id="forgotPinSend" class="btn-primary">Отправить запрос</button>
+          <p id="forgotPinMessage" class="message"></p>
+        </div>
+
         <div class="auth-divider"><span>или</span></div>
 
         <details id="registerBlock">
@@ -172,18 +188,12 @@
         <section class="panel" id="panelCrm">
           <div class="card slide-up">
             <form id="ticketForm" class="crm-form">
-              <label>
-                Тип обращения
-                <select name="type" id="ticketType" required>
-                  <option value="error">Ошибка</option>
-                  <option value="suggestion">Предложение</option>
-                </select>
-              </label>
+              <input type="hidden" name="type" value="error" />
               <label>
                 Модуль
                 <select name="module" id="ticketModule" required></select>
               </label>
-              <label id="categoryLabel">
+              <label>
                 Категория ошибки
                 <select name="category" id="ticketCategory" required></select>
               </label>

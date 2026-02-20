@@ -32,10 +32,8 @@ const scheduleGrid = $('scheduleGrid');
 const bookingMessage = $('bookingMessage');
 
 const ticketForm = $('ticketForm');
-const ticketType = $('ticketType');
 const ticketModule = $('ticketModule');
 const ticketCategory = $('ticketCategory');
-const categoryLabel = $('categoryLabel');
 const ticketMessage = $('ticketMessage');
 
 const bookingPopup = $('bookingPopup');
@@ -241,6 +239,43 @@ logoutBtn.addEventListener('click', () => {
   showAuth();
   pinInput.value = '';
   msg(loginMessage, '');
+});
+
+/* ── Forgot PIN ── */
+
+const forgotPinBtn = $('forgotPinBtn');
+const forgotPinForm = $('forgotPinForm');
+const forgotPinName = $('forgotPinName');
+const forgotPinContact = $('forgotPinContact');
+const forgotPinSend = $('forgotPinSend');
+const forgotPinMessage = $('forgotPinMessage');
+
+forgotPinBtn.addEventListener('click', () => {
+  forgotPinForm.classList.toggle('hidden');
+  msg(forgotPinMessage, '');
+});
+
+forgotPinSend.addEventListener('click', async () => {
+  const name = forgotPinName.value.trim();
+  const contact = forgotPinContact.value.trim();
+  if (!name || name.length < 3) { msg(forgotPinMessage, 'Укажите ФИО (минимум 3 символа).', 'error'); return; }
+  if (!contact || contact.length < 3) { msg(forgotPinMessage, 'Укажите контакт для связи.', 'error'); return; }
+  msg(forgotPinMessage, '');
+  forgotPinSend.disabled = true;
+  try {
+    const result = await api('/api/auth/forgot-pin', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ fullName: name, contact })
+    });
+    msg(forgotPinMessage, result.message, 'success');
+    forgotPinName.value = '';
+    forgotPinContact.value = '';
+  } catch (err) {
+    msg(forgotPinMessage, err.message, 'error');
+  } finally {
+    forgotPinSend.disabled = false;
+  }
 });
 
 /* ── Load app ── */
@@ -645,17 +680,11 @@ function renderCrmConfig() {
   ticketCategory.innerHTML = state.crmConfig.errorCategories.map((c) => `<option value="${esc(c)}">${esc(c)}</option>`).join('');
 }
 
-ticketType.addEventListener('change', () => {
-  if (ticketType.value === 'suggestion') { hide(categoryLabel); ticketCategory.removeAttribute('required'); }
-  else { show(categoryLabel); ticketCategory.setAttribute('required', ''); }
-});
-
 ticketForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   msg(ticketMessage, '');
   const fd = Object.fromEntries(new FormData(ticketForm).entries());
   fd.pin = state.pin;
-  if (fd.type === 'suggestion') delete fd.category;
   try {
     const result = await api('/api/tickets', {
       method: 'POST',
@@ -663,7 +692,6 @@ ticketForm.addEventListener('submit', async (e) => {
       body: JSON.stringify(fd)
     });
     ticketForm.reset();
-    ticketType.dispatchEvent(new Event('change'));
     msg(ticketMessage, result.message, 'success');
   } catch (err) {
     msg(ticketMessage, err.message, 'error');
@@ -706,11 +734,15 @@ function fmtDate(iso) {
   return `${pad(d.getDate())}.${pad(d.getMonth()+1)}.${d.getFullYear()} ${pad(d.getHours())}:${pad(d.getMinutes())}`;
 }
 
+let adminUsersCache = [];
+
 function renderAdminTable(type, data) {
   if (!data.length) {
     adminContent.innerHTML = '<p class="admin-empty">Пока пусто</p>';
     return;
   }
+
+  if (type === 'users') adminUsersCache = data;
 
   let html = '<table class="admin-table">';
 
@@ -723,7 +755,7 @@ function renderAdminTable(type, data) {
         <td>${esc(b.topic)}</td>
         <td>${esc(b.fullName)}</td>
         <td>${esc(b.contact)}</td>
-        <td><button class="btn-cancel-sm" onclick="window._cancelAdminBooking('${b.id}')">Отменить</button></td>
+        <td><button class="btn-cancel-sm" data-action="cancel-booking" data-id="${esc(b.id)}">Отменить</button></td>
       </tr>`;
     }
   } else if (type === 'tickets') {
@@ -758,50 +790,56 @@ function renderAdminTable(type, data) {
         <td>${esc(u.pin)}</td>
         <td>${esc(u.fullName)}</td>
         <td>${esc(u.contact)}</td>
-        <td><button class="${adminClass}" onclick="window._toggleAdmin('${esc(u.pin)}')">${adminLabel}</button></td>
+        <td><button class="${adminClass}" data-action="toggle-admin" data-pin="${esc(u.pin)}">${adminLabel}</button></td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
-        <td><button class="btn-edit-user" onclick="window._editUser('${esc(u.pin)}','${esc(u.fullName).replace(/'/g,"\\'")}','${esc(u.contact).replace(/'/g,"\\'")}')">Ред.</button></td>
+        <td><button class="btn-edit-user" data-action="edit-user" data-pin="${esc(u.pin)}">Ред.</button></td>
       </tr>`;
     }
   }
 
   html += '</table>';
   adminContent.innerHTML = html;
+
+  // Event delegation for admin actions
+  adminContent.querySelectorAll('[data-action]').forEach((btn) => {
+    btn.addEventListener('click', handleAdminAction);
+  });
 }
 
-window._cancelAdminBooking = async (id) => {
-  if (!confirm('Отменить бронирование?')) return;
-  try {
-    await api(`/api/bookings/${id}?pin=${encodeURIComponent(state.pin)}`, { method: 'DELETE' });
-    loadAdminData('bookings');
-  } catch (err) {
-    alert(err.message);
-  }
-};
+async function handleAdminAction(e) {
+  const btn = e.currentTarget;
+  const action = btn.dataset.action;
 
-window._toggleAdmin = async (targetPin) => {
-  try {
-    await api('/api/admin/toggle-admin', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, targetPin })
-    });
-    loadAdminData('users');
-  } catch (err) {
-    alert(err.message);
+  if (action === 'cancel-booking') {
+    if (!confirm('Отменить бронирование?')) return;
+    try {
+      await api(`/api/bookings/${btn.dataset.id}?pin=${encodeURIComponent(state.pin)}`, { method: 'DELETE' });
+      loadAdminData('bookings');
+    } catch (err) { alert(err.message); }
+
+  } else if (action === 'toggle-admin') {
+    try {
+      await api('/api/admin/toggle-admin', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin, targetPin: btn.dataset.pin })
+      });
+      loadAdminData('users');
+    } catch (err) { alert(err.message); }
+
+  } else if (action === 'edit-user') {
+    const u = adminUsersCache.find((x) => x.pin === btn.dataset.pin);
+    if (!u) return;
+    editUserOriginalPin.value = u.pin;
+    editUserName.value = u.fullName;
+    editUserContact.value = u.contact;
+    editUserPin.value = u.pin;
+    msg(editUserMessage, '');
+    show(editUserPopup);
   }
-};
+}
 
 /* ── Edit user popup (admin) ── */
-
-window._editUser = (pin, name, contact) => {
-  editUserOriginalPin.value = pin;
-  editUserName.value = name;
-  editUserContact.value = contact;
-  editUserPin.value = pin;
-  msg(editUserMessage, '');
-  show(editUserPopup);
-};
 
 editUserCancel.addEventListener('click', () => hide(editUserPopup));
 editUserPopup.addEventListener('click', (e) => { if (e.target === editUserPopup) hide(editUserPopup); });

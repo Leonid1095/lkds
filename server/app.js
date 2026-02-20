@@ -224,6 +224,27 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   });
 });
 
+/* ── Forgot PIN ── */
+
+app.post('/api/auth/forgot-pin', loginLimiter, async (req, res) => {
+  const fullName = clip(String(req.body.fullName || '').trim(), 100);
+  const contact = clip(String(req.body.contact || '').trim(), 200);
+
+  if (!fullName || fullName.length < 3)
+    return res.status(400).json({ message: 'Укажите ФИО (минимум 3 символа).' });
+  if (!contact || contact.length < 3)
+    return res.status(400).json({ message: 'Укажите контакт для связи.' });
+
+  tgNotifyAdmins(
+    `🔑 <b>Запрос восстановления пин-кода</b>\n` +
+    `ФИО: ${fullName}\n` +
+    `Контакт: ${contact}\n` +
+    `Время: ${new Date().toLocaleString('ru-RU', { timeZone: 'Europe/Moscow' })}`
+  );
+
+  return res.json({ message: 'Запрос отправлен администратору. Ожидайте — с вами свяжутся.' });
+});
+
 /* ── Settings ── */
 
 app.get('/api/settings', (_req, res) => {
