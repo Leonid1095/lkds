@@ -26,6 +26,8 @@ body{
   background:var(--bg);
   color:var(--text);
   line-height:1.5;
+  -webkit-text-size-adjust:100%;
+  -webkit-tap-highlight-color:transparent;
 }
 
 .hidden{display:none!important}
@@ -469,19 +471,129 @@ button{
 }
 .btn-danger-outline:hover{background:#fed7d7;border-color:var(--danger)}
 
-/* ── Responsive ── */
+/* ── Responsive: Tablet ── */
 
 @media(max-width:740px){
   .schedule-controls{flex-direction:column}
   .schedule-controls label{min-width:0}
   .crm-form{grid-template-columns:1fr}
-  .slot-row{grid-template-columns:1fr}
-  .content{padding:12px 16px 24px}
+  .content{padding:14px 16px 24px}
   .topbar{padding:10px 16px;flex-wrap:wrap;gap:8px}
   .topbar-right{width:100%;justify-content:flex-end}
   .tabs{padding:0 12px}
-  .tab{padding:10px 12px;font-size:13px}
+  .tab{padding:10px 14px;font-size:13px}
+  .tab svg{display:none}
   h1{font-size:16px}
   .auth-card{padding:28px 20px}
   .profile-card-body{flex-direction:column;align-items:center}
+  .card{padding:18px}
+  .popup-overlay{padding:16px}
+  .popup-card{padding:22px;border-radius:16px}
+  .admin-table{font-size:12px}
+  .admin-table th,.admin-table td{padding:6px 8px}
+}
+
+/* ── Responsive: Mobile ── */
+
+@media(max-width:480px){
+  .auth-screen{padding:12px}
+  .auth-card{padding:24px 16px;border-radius:16px}
+  .auth-card h1{font-size:24px}
+  .auth-welcome{font-size:12px}
+  .train-scene{height:52px;border-radius:8px;margin-bottom:8px}
+  .train-svg{width:220px;height:48px}
+  .train{width:220px;height:48px}
+
+  .topbar{padding:8px 12px;gap:6px}
+  .topbar h1{font-size:15px;letter-spacing:0}
+  .topbar .subtitle{font-size:11px;max-width:120px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+  .topbar-icon{width:22px;height:22px;display:none}
+  .topbar-left{gap:8px}
+  .topbar-right{gap:6px}
+  .topbar-user{padding:2px 4px;gap:6px}
+  .avatar-sm{width:28px;height:28px}
+
+  .btn-accent,.btn-outline{padding:7px 10px;font-size:12px}
+  .btn-accent svg,.btn-outline svg{width:14px;height:14px}
+
+  .tabs{padding:0 8px;gap:0}
+  .tab{padding:10px 10px;font-size:12px;flex:1;justify-content:center}
+  .tab svg{display:none}
+
+  .content{padding:10px 12px 20px}
+  .card{padding:14px;border-radius:12px}
+
+  .schedule-controls{gap:8px}
+  .schedule-controls .btn-secondary{width:100%}
+
+  .slot-row{grid-template-columns:1fr;gap:4px;margin-bottom:8px}
+  .slot-time{font-size:12px;padding-left:4px}
+  .slot-status{padding:10px 12px;font-size:12px;border-radius:8px}
+  .slot-status.free.clickable::after{right:8px;width:22px;height:22px;font-size:14px;opacity:1}
+
+  .popup-overlay{padding:8px;align-items:flex-end}
+  .popup-card{
+    padding:20px 16px;border-radius:16px 16px 0 0;
+    max-width:100%;max-height:90vh;overflow-y:auto;
+  }
+  .popup-card h3{font-size:15px;margin-bottom:14px}
+  .popup-time-row{grid-template-columns:1fr 1fr;gap:8px}
+  .popup-actions{flex-direction:column}
+  .popup-actions button{width:100%}
+
+  .profile-popup-card{max-width:100%}
+  .profile-avatar{width:72px;height:72px}
+  .profile-label{font-size:10px}
+  .profile-value{font-size:13px}
+  .profile-input{font-size:12px;padding:5px 8px}
+
+  .crm-form{gap:10px}
+
+  .link-btn{padding:12px 14px;gap:10px}
+  .link-icon{width:36px;height:36px;border-radius:10px}
+  .link-title{font-size:13px}
+  .link-desc{font-size:11px}
+
+  .admin-tabs{flex-wrap:wrap;gap:0}
+  .admin-tab{padding:6px 10px;font-size:11px;flex:1;text-align:center;justify-content:center}
+  .admin-table{font-size:11px}
+  .admin-table th,.admin-table td{padding:5px 6px}
+  .admin-table .desc-cell{max-width:140px}
+  .btn-cancel-sm,.btn-toggle-admin,.btn-edit-user{padding:3px 8px;font-size:11px}
+
+  .cancel-actions button{font-size:13px;padding:10px 14px}
+
+  .avatar-upload-zone{padding:12px 8px}
+  .avatar-upload-text{font-size:12px}
+  .avatar-upload-hint{font-size:10px}
+
+  .message{font-size:12px}
+  .hint{font-size:11px}
+
+  input,select,textarea{font-size:16px;padding:10px 12px}
+
+  /* Safe area for iPhone notch */
+  .topbar{
+    padding-top:max(8px, env(safe-area-inset-top));
+    padding-left:max(12px, env(safe-area-inset-left));
+    padding-right:max(12px, env(safe-area-inset-right));
+  }
+  .content{
+    padding-bottom:max(20px, env(safe-area-inset-bottom));
+  }
+  .popup-card{
+    padding-bottom:max(20px, env(safe-area-inset-bottom));
+  }
+}
+
+/* ── Touch-friendly: min tap target 44px ── */
+@media(pointer:coarse){
+  button{min-height:44px}
+  .btn-cancel-slot{min-width:36px;min-height:36px;padding:4px 8px}
+  .btn-toggle-admin,.btn-edit-user,.btn-cancel-sm{min-height:36px}
+  .tab{min-height:44px}
+  .admin-tab{min-height:40px}
+  .slot-status.free.clickable{min-height:48px}
+  .slot-status.free.clickable::after{opacity:1}
+  .link-btn{min-height:56px}
 }
