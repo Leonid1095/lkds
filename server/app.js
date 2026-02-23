@@ -19,6 +19,7 @@ const publicDir = path.join(rootDir, 'public');
 const avatarsDir = path.join(dataDir, 'avatars');
 
 const app = express();
+app.set('trust proxy', 1);
 const port = Number(process.env.PORT) || 3000;
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'https://lkds-room.duckdns.org';
 const SUGGESTION_EMAIL = 'ymerchii@yandex.ru';
@@ -242,6 +243,10 @@ app.post('/api/auth/forgot-pin', loginLimiter, async (req, res) => {
     createdAt: new Date().toISOString()
   });
   await writeJson(FILES.pinRequests, requests);
+
+  tgNotifyAdmins(
+    `🔑 <b>Забыл пин-код</b>\n\nФИО: ${fullName}\nКонтакт: ${contact}`
+  );
 
   return res.json({ message: 'Запрос отправлен администратору. Ожидайте — с вами свяжутся.' });
 });
