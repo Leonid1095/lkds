@@ -123,6 +123,59 @@ async function sendEmail(to, subject, text) {
   }
 }
 
+/* ── CRM Bot sync config ── */
+
+const CRM_BOT_ADMIN_IDS = [1148520376, 342206882, 93676173, 6068630429];
+const CRM_BOT_TICKETS_FILE = path.resolve(rootDir, '../crm-support-bot/data/tickets.json');
+
+async function tgSendWithButton(botToken, chatId, text, callbackData) {
+  if (!botToken) return null;
+  try {
+    const res = await fetch(`https://api.telegram.org/bot${botToken}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        chat_id: chatId,
+        text,
+        parse_mode: 'HTML',
+        reply_markup: {
+          inline_keyboard: [[{ text: '✅ Взять в работу', callback_data: callbackData }]]
+        }
+      })
+    });
+    const data = await res.json();
+    return data.ok ? data.result.message_id : null;
+  } catch (err) {
+    console.error('TG sendWithButton failed:', err.message);
+    return null;
+  }
+}
+
+async function createBotTicket(type, fio, module, category, description) {
+  const store = await readJson(CRM_BOT_TICKETS_FILE, { next_id: 1, items: {} });
+  const tid = store.next_id;
+  const now = new Date();
+  const pad = (n) => String(n).padStart(2, '0');
+  const createdAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+
+  store.items[String(tid)] = {
+    type,
+    fio,
+    module,
+    category,
+    description,
+    status: 'new',
+    taken_by: null,
+    admin_messages: {},
+    group_message_id: null,
+    created_at: createdAt,
+    source: 'portal'
+  };
+  store.next_id = tid + 1;
+  await writeJson(CRM_BOT_TICKETS_FILE, store);
+  return tid;
+}
+
 /* ── CRM config ── */
 
 const CRM_MODULES = [
@@ -502,14 +555,34 @@ app.post('/api/tickets', async (req, res) => {
   tickets.push(ticket);
   await writeJson(FILES.tickets, tickets);
 
-  const label = type === 'error' ? '🐛 Ошибка' : '💡 Предложение';
-  tgNotifyAdmins(
-    `${label} <b>1С CRM</b>\n` +
-    `Модуль: ${module}\n` +
-    (type === 'error' ? `Категория: ${category}\n` : '') +
-    `Описание: ${description}\n` +
-    `От: ${user.fullName} (${user.contact})`
-  );
+  /* ── Sync to crm-support-bot ── */
+  const botType = type === 'error' ? 'Ошибка' : 'Предложение';
+  const botCategory = type === 'error' ? category : '—';
+  try {
+    const tid = await createBotTicket(botType, user.fullName, module, botCategory, description);
+
+    const tgText =
+      `🚨 Новая заявка #${tid}: ${botType}\n` +
+      `👤 ${user.fullName}\n` +
+      `📦 ${module}\n` +
+      `📂 ${botCategory}\n` +
+      `💬 ${description}`;
+
+    const adminMessages = {};
+    for (const adminId of CRM_BOT_ADMIN_IDS) {
+      const msgId = await tgSendWithButton(TG_TOKEN, adminId, tgText, `take:${tid}`);
+      if (msgId) adminMessages[String(adminId)] = msgId;
+    }
+
+    // Save message_ids back to bot ticket
+    const store = await readJson(CRM_BOT_TICKETS_FILE, { next_id: 1, items: {} });
+    if (store.items[String(tid)]) {
+      store.items[String(tid)].admin_messages = adminMessages;
+      await writeJson(CRM_BOT_TICKETS_FILE, store);
+    }
+  } catch (err) {
+    console.error('CRM bot sync failed:', err.message);
+  }
 
   const labelRu = type === 'error' ? 'Ошибка' : 'Предложение';
   return res.status(201).json({ message: `${labelRu} принята. Спасибо!`, id: ticket.id });
