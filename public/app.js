@@ -91,6 +91,26 @@ const itWizard = $('itWizard');
 const itTicketMessage = $('itTicketMessage');
 const adminContent = $('adminContent');
 
+/* ── IT config (hardcoded — always available) ── */
+
+const IT_CATEGORIES = [
+  { id: 'software', emoji: '\uD83E\uDDE9', label: 'ПО/установка',
+    subcategories: ['Установить/обновить программу', 'Лицензия/активация', 'Ошибка/вылетает', 'Печать/принтер'] },
+  { id: 'hardware', emoji: '\uD83D\uDCBB', label: 'Компьютер/ноутбук',
+    subcategories: ['Тормозит/зависает', 'Не включается', 'Клавиатура/мышь/монитор'] },
+  { id: 'network', emoji: '\uD83C\uDF10', label: 'Интернет/сеть',
+    subcategories: ['Wi-Fi не работает', 'Нет интернета', 'Низкая скорость'] },
+  { id: 'vks', emoji: '\uD83D\uDCF9', label: 'ВКС/Презентация',
+    disabled: true, subcategories: [] },
+  { id: 'other', emoji: '\uD83D\uDD27', label: 'Другое',
+    subcategories: [] }
+];
+
+const IT_LOCATIONS = [
+  'Модуль ЖД', 'Модуль КП', 'Офис 2 этаж',
+  'Диспетчерская', 'Диспетчеры и операторы КП', 'Приемосдатчик'
+];
+
 /* ── State ── */
 const state = {
   pin: null,
@@ -101,7 +121,6 @@ const state = {
   rooms: [],
   bookings: [],
   crmConfig: { modules: [], errorCategories: [] },
-  itConfig: { categories: [], locations: [] },
   itTicket: { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' }
 };
 
@@ -285,18 +304,16 @@ forgotPinSend.addEventListener('click', async () => {
 /* ── Load app ── */
 
 async function loadApp() {
-  const [settings, rooms, links, crmConfig, itConfig] = await Promise.all([
-    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config'), api('/api/it-config')
+  const [settings, rooms, links, crmConfig] = await Promise.all([
+    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config')
   ]);
   state.settings = settings;
   state.rooms = rooms;
   state.crmConfig = crmConfig;
-  state.itConfig = itConfig;
 
   renderRooms();
   renderLinks(links);
   renderCrmConfig();
-  resetItWizard();
 
   dateInput.value = getToday();
   await loadBookings();
@@ -716,7 +733,7 @@ function itBreadcrumbs() {
   const t = state.itTicket;
   const parts = [];
   if (t.category) {
-    const cat = state.itConfig.categories.find((c) => c.id === t.category);
+    const cat = IT_CATEGORIES.find((c) => c.id === t.category);
     if (cat) parts.push(`${cat.emoji} ${cat.label}`);
   }
   if (t.subcategory) parts.push(t.subcategory);
@@ -738,7 +755,7 @@ function renderItStep() {
 
   if (step === 1) {
     html += `<p class="it-step-title">Выберите категорию</p><div class="it-options">`;
-    for (const cat of state.itConfig.categories) {
+    for (const cat of IT_CATEGORIES) {
       const dis = cat.disabled ? ' disabled' : '';
       const badge = cat.disabled ? '<span class="badge-dev">В разработке</span>' : '';
       html += `<button class="it-option${dis}" data-cat="${esc(cat.id)}">
@@ -748,7 +765,7 @@ function renderItStep() {
     html += '</div>';
 
   } else if (step === 2) {
-    const cat = state.itConfig.categories.find((c) => c.id === t.category);
+    const cat = IT_CATEGORIES.find((c) => c.id === t.category);
     if (t.category === 'other') {
       html += `<p class="it-step-title">Опишите проблему</p>`;
       html += `<div class="it-desc-group">
@@ -770,7 +787,7 @@ function renderItStep() {
 
   } else if (step === 3) {
     html += `<p class="it-step-title">Где возникла проблема?</p><div class="it-options">`;
-    for (const loc of state.itConfig.locations) {
+    for (const loc of IT_LOCATIONS) {
       html += `<button class="it-option" data-loc="${esc(loc)}">
         ${esc(loc)}
       </button>`;
@@ -808,7 +825,7 @@ function bindItEvents() {
   itWizard.querySelectorAll('[data-cat]').forEach((btn) => {
     btn.addEventListener('click', () => {
       const catId = btn.dataset.cat;
-      const cat = state.itConfig.categories.find((c) => c.id === catId);
+      const cat = IT_CATEGORIES.find((c) => c.id === catId);
       if (cat && cat.disabled) return;
       t.category = catId;
       if (catId === 'other') {
@@ -1158,6 +1175,8 @@ editUserForm.addEventListener('submit', async (e) => {
 });
 
 /* ── Init ── */
+
+resetItWizard();
 
 (async () => {
   const loggedIn = await tryAutoLogin();
