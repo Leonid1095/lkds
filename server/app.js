@@ -34,6 +34,7 @@ const FILES = {
   bookings: path.join(dataDir, 'bookings.json'),
   users: path.join(dataDir, 'users.json'),
   tickets: path.join(dataDir, 'tickets.json'),
+  itTickets: path.join(dataDir, 'it-tickets.json'),
   suggestions: path.join(dataDir, 'suggestions.json'),
   pinRequests: path.join(dataDir, 'pin-requests.json')
 };
@@ -77,6 +78,8 @@ const registerLimiter = rateLimit({
 const TG_TOKEN = process.env.TG_BOT_TOKEN || '';
 const TG_ADMIN_IDS = (process.env.TG_ADMIN_IDS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
+const TG_IT_ADMIN_IDS = (process.env.TG_IT_ADMIN_IDS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 
 async function tgSend(chatId, text) {
   if (!TG_TOKEN) return;
@@ -93,6 +96,10 @@ async function tgSend(chatId, text) {
 
 function tgNotifyAdmins(text) {
   for (const id of TG_ADMIN_IDS) tgSend(id, text);
+}
+
+function tgNotifyItAdmins(text) {
+  for (const id of TG_IT_ADMIN_IDS) tgSend(id, text);
 }
 
 /* ── Email ── */
@@ -132,6 +139,54 @@ const ERROR_CATEGORIES = [
   'Проблема с карточкой интереса',
   'Другое'
 ];
+
+/* ── IT Tickets config ── */
+
+const IT_CONFIG = {
+  categories: [
+    {
+      id: 'software', emoji: '\uD83E\uDDE9', label: 'ПО/установка',
+      subcategories: [
+        'Установить/обновить программу',
+        'Лицензия/активация',
+        'Ошибка/вылетает',
+        'Печать/принтер'
+      ]
+    },
+    {
+      id: 'hardware', emoji: '\uD83D\uDCBB', label: 'Компьютер/ноутбук',
+      subcategories: [
+        'Тормозит/зависает',
+        'Не включается',
+        'Клавиатура/мышь/монитор'
+      ]
+    },
+    {
+      id: 'network', emoji: '\uD83C\uDF10', label: 'Интернет/сеть',
+      subcategories: [
+        'Wi-Fi не работает',
+        'Нет интернета',
+        'Низкая скорость'
+      ]
+    },
+    {
+      id: 'vks', emoji: '\uD83D\uDCF9', label: 'ВКС/Презентация',
+      disabled: true, subcategories: []
+    },
+    {
+      id: 'other', emoji: '\uD83D\uDD27', label: 'Другое',
+      subcategories: []
+    }
+  ],
+  locations: [
+    'Модуль ЖД',
+    'Модуль КП',
+    'Офис 2 этаж',
+    'Диспетчерская',
+    'Диспетчеры и операторы КП',
+    'Приемосдатчик'
+  ]
+};
 
 /* ── Multer for avatars ── */
 
@@ -259,6 +314,10 @@ app.get('/api/settings', (_req, res) => {
 
 app.get('/api/crm-config', (_req, res) => {
   res.json({ modules: CRM_MODULES, errorCategories: ERROR_CATEGORIES });
+});
+
+app.get('/api/it-config', (_req, res) => {
+  res.json(IT_CONFIG);
 });
 
 /* ── Rooms & Links ── */
@@ -456,6 +515,58 @@ app.post('/api/tickets', async (req, res) => {
   return res.status(201).json({ message: `${labelRu} принята. Спасибо!`, id: ticket.id });
 });
 
+/* ── IT Tickets ── */
+
+app.post('/api/it-tickets', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const category = String(req.body.category || '').trim();
+  const subcategory = String(req.body.subcategory || '').trim();
+  const location = String(req.body.location || '').trim();
+  const seat = String(req.body.seat || '').trim();
+  const description = clip(String(req.body.description || '').trim(), 2000);
+
+  const users = await readJson(FILES.users, {});
+  const user = users[pin];
+  if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
+
+  const cat = IT_CONFIG.categories.find((c) => c.id === category);
+  if (!cat) return res.status(400).json({ message: 'Выберите категорию.' });
+  if (cat.disabled) return res.status(400).json({ message: 'Эта категория пока недоступна.' });
+  if (category !== 'other' && cat.subcategories.length && !cat.subcategories.includes(subcategory))
+    return res.status(400).json({ message: 'Выберите тип проблемы.' });
+  if (!IT_CONFIG.locations.includes(location))
+    return res.status(400).json({ message: 'Выберите локацию.' });
+  if (location === 'Офис 2 этаж') {
+    const seatNum = Number(seat);
+    if (!seat || isNaN(seatNum) || seatNum < 1 || seatNum > 260)
+      return res.status(400).json({ message: 'Укажите номер места (1–260).' });
+  }
+
+  const tickets = await readJson(FILES.itTickets, []);
+  const ticket = {
+    id: randomUUID(), category: cat.label,
+    subcategory: category === 'other' ? (description || '—') : (subcategory || '—'),
+    location, seat: location === 'Офис 2 этаж' ? seat : '',
+    description: description || '—',
+    fullName: user.fullName, contact: user.contact,
+    status: 'new', createdAt: new Date().toISOString()
+  };
+  tickets.push(ticket);
+  await writeJson(FILES.itTickets, tickets);
+
+  // TODO: forward to IT API when ready
+  tgNotifyItAdmins(
+    `🔧 <b>ИТ-заявка</b>\n` +
+    `Категория: ${cat.emoji} ${cat.label}\n` +
+    (category !== 'other' && subcategory ? `Тип: ${subcategory}\n` : '') +
+    `Локация: ${location}${location === 'Офис 2 этаж' && seat ? ` (место ${seat})` : ''}\n` +
+    `Описание: ${ticket.description}\n` +
+    `От: ${user.fullName} (${user.contact})`
+  );
+
+  return res.status(201).json({ message: 'ИТ-заявка отправлена. Спасибо!', id: ticket.id });
+});
+
 /* ── Suggestions ── */
 
 app.post('/api/suggestions', async (req, res) => {
@@ -491,6 +602,12 @@ app.post('/api/admin/tickets', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.tickets, []));
+});
+
+app.post('/api/admin/it-tickets', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  return res.json(await readJson(FILES.itTickets, []));
 });
 
 app.post('/api/admin/suggestions', async (req, res) => {

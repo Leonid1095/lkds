@@ -87,6 +87,8 @@ const profileMessage = $('profileMessage');
 const profileActions = $('profileActions');
 
 const linksGrid = $('linksGrid');
+const itWizard = $('itWizard');
+const itTicketMessage = $('itTicketMessage');
 const adminContent = $('adminContent');
 
 /* ── State ── */
@@ -98,7 +100,9 @@ const state = {
   settings: { startHour: 8, endHour: 21, slotStep: 0.5 },
   rooms: [],
   bookings: [],
-  crmConfig: { modules: [], errorCategories: [] }
+  crmConfig: { modules: [], errorCategories: [] },
+  itConfig: { categories: [], locations: [] },
+  itTicket: { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' }
 };
 
 /* ── Helpers ── */
@@ -281,16 +285,18 @@ forgotPinSend.addEventListener('click', async () => {
 /* ── Load app ── */
 
 async function loadApp() {
-  const [settings, rooms, links, crmConfig] = await Promise.all([
-    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config')
+  const [settings, rooms, links, crmConfig, itConfig] = await Promise.all([
+    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config'), api('/api/it-config')
   ]);
   state.settings = settings;
   state.rooms = rooms;
   state.crmConfig = crmConfig;
+  state.itConfig = itConfig;
 
   renderRooms();
   renderLinks(links);
   renderCrmConfig();
+  resetItWizard();
 
   dateInput.value = getToday();
   await loadBookings();
@@ -698,6 +704,238 @@ ticketForm.addEventListener('submit', async (e) => {
   }
 });
 
+/* ── IT Wizard ── */
+
+function resetItWizard() {
+  state.itTicket = { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' };
+  msg(itTicketMessage, '');
+  renderItStep();
+}
+
+function itBreadcrumbs() {
+  const t = state.itTicket;
+  const parts = [];
+  if (t.category) {
+    const cat = state.itConfig.categories.find((c) => c.id === t.category);
+    if (cat) parts.push(`${cat.emoji} ${cat.label}`);
+  }
+  if (t.subcategory) parts.push(t.subcategory);
+  if (t.location) parts.push(t.location);
+  if (t.seat) parts.push(`Место ${t.seat}`);
+  if (!parts.length) return '';
+  const html = parts.map((p, i) =>
+    i < parts.length - 1
+      ? `<span>${esc(p)}</span><span class="it-bc-sep">&rsaquo;</span>`
+      : `<span class="it-bc-current">${esc(p)}</span>`
+  ).join('');
+  return `<div class="it-breadcrumbs">${html}</div>`;
+}
+
+function renderItStep() {
+  const t = state.itTicket;
+  const step = t.step;
+  let html = itBreadcrumbs();
+
+  if (step === 1) {
+    html += `<p class="it-step-title">Выберите категорию</p><div class="it-options">`;
+    for (const cat of state.itConfig.categories) {
+      const dis = cat.disabled ? ' disabled' : '';
+      const badge = cat.disabled ? '<span class="badge-dev">В разработке</span>' : '';
+      html += `<button class="it-option${dis}" data-cat="${esc(cat.id)}">
+        <span class="it-emoji">${cat.emoji}</span>${esc(cat.label)}${badge}
+      </button>`;
+    }
+    html += '</div>';
+
+  } else if (step === 2) {
+    const cat = state.itConfig.categories.find((c) => c.id === t.category);
+    if (t.category === 'other') {
+      html += `<p class="it-step-title">Опишите проблему</p>`;
+      html += `<div class="it-desc-group">
+        <label>Описание проблемы</label>
+        <textarea id="itOtherDesc" rows="4" placeholder="Опишите вашу проблему..."></textarea>
+      </div>`;
+      html += `<button class="it-submit-btn" id="itOtherNext">Далее</button>`;
+      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
+    } else {
+      html += `<p class="it-step-title">Выберите тип проблемы</p><div class="it-options">`;
+      for (const sub of cat.subcategories) {
+        html += `<button class="it-option" data-sub="${esc(sub)}">
+          ${esc(sub)}
+        </button>`;
+      }
+      html += '</div>';
+      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
+    }
+
+  } else if (step === 3) {
+    html += `<p class="it-step-title">Где возникла проблема?</p><div class="it-options">`;
+    for (const loc of state.itConfig.locations) {
+      html += `<button class="it-option" data-loc="${esc(loc)}">
+        ${esc(loc)}
+      </button>`;
+    }
+    html += '</div>';
+    html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
+
+  } else if (step === 4) {
+    html += `<p class="it-step-title">Укажите номер места</p>`;
+    html += `<div class="it-seat-group">
+      <label>Номер места (1–260)</label>
+      <input id="itSeatInput" type="number" min="1" max="260" placeholder="Номер места" />
+    </div>`;
+    html += `<button class="it-submit-btn" id="itSeatNext">Далее</button>`;
+    html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
+
+  } else if (step === 5) {
+    html += `<p class="it-step-title">Опишите детали проблемы</p>`;
+    html += `<div class="it-desc-group">
+      <label>Описание (можно «-» чтобы пропустить)</label>
+      <textarea id="itDescInput" rows="4" placeholder="Подробности проблемы..."></textarea>
+    </div>`;
+    html += `<button class="it-submit-btn" id="itSubmitBtn">Отправить</button>`;
+    html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
+  }
+
+  itWizard.innerHTML = html;
+  bindItEvents();
+}
+
+function bindItEvents() {
+  const t = state.itTicket;
+
+  // Step 1: category selection
+  itWizard.querySelectorAll('[data-cat]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const catId = btn.dataset.cat;
+      const cat = state.itConfig.categories.find((c) => c.id === catId);
+      if (cat && cat.disabled) return;
+      t.category = catId;
+      if (catId === 'other') {
+        t.step = 2;
+      } else {
+        t.step = 2;
+      }
+      msg(itTicketMessage, '');
+      renderItStep();
+    });
+  });
+
+  // Step 2: subcategory selection
+  itWizard.querySelectorAll('[data-sub]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      t.subcategory = btn.dataset.sub;
+      t.step = 3;
+      msg(itTicketMessage, '');
+      renderItStep();
+    });
+  });
+
+  // Step 2 "other" next button
+  const otherNext = $('itOtherNext');
+  if (otherNext) {
+    otherNext.addEventListener('click', () => {
+      const desc = $('itOtherDesc').value.trim();
+      if (!desc || desc.length < 3) {
+        msg(itTicketMessage, 'Опишите проблему (минимум 3 символа).', 'error');
+        return;
+      }
+      t.subcategory = desc;
+      t.description = desc;
+      t.step = 3;
+      msg(itTicketMessage, '');
+      renderItStep();
+    });
+  }
+
+  // Step 3: location selection
+  itWizard.querySelectorAll('[data-loc]').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      t.location = btn.dataset.loc;
+      if (t.location === 'Офис 2 этаж') {
+        t.step = 4;
+      } else {
+        t.seat = '';
+        t.step = 5;
+      }
+      msg(itTicketMessage, '');
+      renderItStep();
+    });
+  });
+
+  // Step 4: seat number
+  const seatNext = $('itSeatNext');
+  if (seatNext) {
+    seatNext.addEventListener('click', () => {
+      const val = Number($('itSeatInput').value);
+      if (!val || val < 1 || val > 260) {
+        msg(itTicketMessage, 'Укажите номер места от 1 до 260.', 'error');
+        return;
+      }
+      t.seat = String(val);
+      t.step = 5;
+      msg(itTicketMessage, '');
+      renderItStep();
+    });
+  }
+
+  // Step 5: submit
+  const submitBtn = $('itSubmitBtn');
+  if (submitBtn) {
+    submitBtn.addEventListener('click', async () => {
+      const desc = $('itDescInput').value.trim() || '-';
+      if (t.category !== 'other') t.description = desc;
+      msg(itTicketMessage, '');
+      submitBtn.disabled = true;
+      try {
+        const result = await api('/api/it-tickets', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pin: state.pin,
+            category: t.category,
+            subcategory: t.subcategory || '',
+            location: t.location,
+            seat: t.seat,
+            description: t.description
+          })
+        });
+        msg(itTicketMessage, result.message, 'success');
+        setTimeout(() => resetItWizard(), 2000);
+      } catch (err) {
+        msg(itTicketMessage, err.message, 'error');
+        submitBtn.disabled = false;
+      }
+    });
+  }
+
+  // Back button
+  const backBtn = $('itBackBtn');
+  if (backBtn) {
+    backBtn.addEventListener('click', () => {
+      msg(itTicketMessage, '');
+      if (t.step === 5) {
+        if (t.location === 'Офис 2 этаж') { t.seat = ''; t.step = 4; }
+        else { t.step = 3; }
+      } else if (t.step === 4) {
+        t.location = null;
+        t.step = 3;
+      } else if (t.step === 3) {
+        t.subcategory = null;
+        t.location = null;
+        if (t.category === 'other') { t.description = ''; }
+        t.step = 2;
+      } else if (t.step === 2) {
+        t.category = null;
+        t.subcategory = null;
+        t.description = '';
+        t.step = 1;
+      }
+      renderItStep();
+    });
+  }
+}
+
 /* ── Admin panel ── */
 
 const pinRequestsBadge = $('pinRequestsBadge');
@@ -786,6 +1024,19 @@ function renderAdminTable(type, data) {
         <td>${label}</td>
         <td>${esc(t.module)}</td>
         <td>${esc(t.category)}</td>
+        <td class="desc-cell">${esc(t.description)}</td>
+        <td>${esc(t.fullName)}</td>
+      </tr>`;
+    }
+  } else if (type === 'it-tickets') {
+    html += '<tr><th>Дата</th><th>Категория</th><th>Тип проблемы</th><th>Локация</th><th>Место</th><th>Описание</th><th>Кто</th></tr>';
+    for (const t of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+      html += `<tr>
+        <td style="white-space:nowrap">${fmtDate(t.createdAt)}</td>
+        <td>${esc(t.category)}</td>
+        <td>${esc(t.subcategory)}</td>
+        <td>${esc(t.location)}</td>
+        <td>${esc(t.seat || '—')}</td>
         <td class="desc-cell">${esc(t.description)}</td>
         <td>${esc(t.fullName)}</td>
       </tr>`;

@@ -1,13 +1,5 @@
 [
   {
-    "id": "it-bot",
-    "title": "ИТ-заявки",
-    "desc": "Оставить заявку по ИТ через @LKDS_IT_bot",
-    "url": "https://t.me/LKDS_IT_bot",
-    "icon": "headset",
-    "disabled": false
-  },
-  {
     "id": "corp-alabuga",
     "title": "Корп Алабуга",
     "desc": "corp.alabuga.ru",
