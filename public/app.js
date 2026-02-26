@@ -91,25 +91,10 @@ const itWizard = $('itWizard');
 const itTicketMessage = $('itTicketMessage');
 const adminContent = $('adminContent');
 
-/* ── IT config (hardcoded — always available) ── */
+/* ── IT config (loaded from API) ── */
 
-const IT_CATEGORIES = [
-  { id: 'software', emoji: '\uD83E\uDDE9', label: 'ПО/установка',
-    subcategories: ['Установить/обновить программу', 'Лицензия/активация', 'Ошибка/вылетает', 'Печать/принтер'] },
-  { id: 'hardware', emoji: '\uD83D\uDCBB', label: 'Компьютер/ноутбук',
-    subcategories: ['Тормозит/зависает', 'Не включается', 'Клавиатура/мышь/монитор'] },
-  { id: 'network', emoji: '\uD83C\uDF10', label: 'Интернет/сеть',
-    subcategories: ['Wi-Fi не работает', 'Нет интернета', 'Низкая скорость'] },
-  { id: 'vks', emoji: '\uD83D\uDCF9', label: 'ВКС/Презентация',
-    disabled: true, subcategories: [] },
-  { id: 'other', emoji: '\uD83D\uDD27', label: 'Другое',
-    subcategories: [] }
-];
-
-const IT_LOCATIONS = [
-  'Модуль ЖД', 'Модуль КП', 'Офис 2 этаж',
-  'Диспетчерская', 'Диспетчеры и операторы КП', 'Приемосдатчик'
-];
+let IT_CATEGORIES = [];
+let IT_LOCATIONS = [];
 
 /* ── State ── */
 const state = {
@@ -154,9 +139,9 @@ function hide(el) { el.classList.add('hidden'); }
 function pad(n) { return String(n).padStart(2, '0'); }
 function fmtTime(t) { const h = Math.floor(t); const m = (t % 1) ? '30' : '00'; return `${pad(h)}:${m}`; }
 
-function avatarUrl(userId, hasAvatar) {
-  if (!hasAvatar || !userId) return DEFAULT_AVATAR;
-  return `/api/avatars/${userId}.jpg?t=${Date.now()}`;
+function avatarUrl(avatar) {
+  if (!avatar) return DEFAULT_AVATAR;
+  return `/api/avatars/${avatar}?t=${Date.now()}`;
 }
 
 /* ── Tabs ── */
@@ -185,7 +170,7 @@ async function tryAutoLogin() {
     state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '' };
     state.userId = data.userId;
     state.isAdmin = !!data.admin;
-    state.hasAvatar = !!data.avatar;
+    state.avatar = data.avatar || '';
     return true;
   } catch {
     localStorage.removeItem('lkds_pin');
@@ -197,7 +182,7 @@ function showMain() {
   hide(authScreen);
   show(mainScreen);
   userGreeting.textContent = state.user.fullName;
-  topbarAvatar.src = avatarUrl(state.userId, state.hasAvatar);
+  topbarAvatar.src = avatarUrl(state.avatar);
   topbarAvatar.alt = state.user.fullName;
   if (state.isAdmin) { show(adminBtn); updatePinBadge(); }
   else hide(adminBtn);
@@ -225,7 +210,7 @@ loginForm.addEventListener('submit', async (e) => {
     state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '' };
     state.userId = data.userId;
     state.isAdmin = !!data.admin;
-    state.hasAvatar = !!data.avatar;
+    state.avatar = data.avatar || '';
     localStorage.setItem('lkds_pin', data.pin);
     showMain();
     await loadApp();
@@ -247,7 +232,7 @@ registerForm.addEventListener('submit', async (e) => {
     state.pin = data.pin;
     state.user = { fullName: data.fullName, contact: data.contact, position: '' };
     state.isAdmin = false;
-    state.hasAvatar = false;
+    state.avatar = '';
     localStorage.setItem('lkds_pin', data.pin);
     msg(registerMessage, 'Регистрация прошла успешно!', 'success');
     registerForm.reset();
@@ -304,16 +289,19 @@ forgotPinSend.addEventListener('click', async () => {
 /* ── Load app ── */
 
 async function loadApp() {
-  const [settings, rooms, links, crmConfig] = await Promise.all([
-    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config')
+  const [settings, rooms, links, crmConfig, itConfig] = await Promise.all([
+    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config'), api('/api/it-config')
   ]);
   state.settings = settings;
   state.rooms = rooms;
   state.crmConfig = crmConfig;
+  IT_CATEGORIES = itConfig.categories || [];
+  IT_LOCATIONS = itConfig.locations || [];
 
   renderRooms();
   renderLinks(links);
   renderCrmConfig();
+  resetItWizard();
 
   dateInput.value = getToday();
   await loadBookings();
@@ -494,7 +482,11 @@ function cancelBooking(bookingId, slotHour) {
 
 async function doFullCancel(bookingId) {
   try {
-    await api(`/api/bookings/${bookingId}?pin=${encodeURIComponent(state.pin)}`, { method: 'DELETE' });
+    await api(`/api/bookings/${bookingId}/cancel`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
     msg(bookingMessage, 'Бронирование отменено.', 'success');
     hide(cancelPopup);
     await loadBookings();
@@ -562,7 +554,7 @@ async function openProfile(pin) {
 
     profileTitle.textContent = isOwn ? 'Мой профиль' : 'Профиль';
     profileName.textContent = data.fullName;
-    profileAvatar.src = avatarUrl(data.userId, data.avatar);
+    profileAvatar.src = avatarUrl(data.avatar);
     profilePosition.value = data.position || '';
     profileContact.value = data.contact || '';
     profileDate.textContent = fmtDate(data.createdAt);
@@ -586,7 +578,7 @@ async function openProfile(pin) {
 
     show(profilePopup);
   } catch (err) {
-    alert(err.message);
+    msg(bookingMessage, err.message, 'error');
   }
 }
 
@@ -657,7 +649,7 @@ function uploadAvatar(file) {
     try {
       const result = JSON.parse(xhr.responseText);
       if (xhr.status >= 200 && xhr.status < 300) {
-        state.hasAvatar = true;
+        state.avatar = result.avatar;
         const newUrl = `/api/avatars/${result.avatar}?t=${Date.now()}`;
         profileAvatar.src = newUrl;
         topbarAvatar.src = newUrl;
@@ -759,7 +751,7 @@ function renderItStep() {
       const dis = cat.disabled ? ' disabled' : '';
       const badge = cat.disabled ? '<span class="badge-dev">В разработке</span>' : '';
       html += `<button class="it-option${dis}" data-cat="${esc(cat.id)}">
-        <span class="it-emoji">${cat.emoji}</span>${esc(cat.label)}${badge}
+        ${esc(cat.label)}${badge}
       </button>`;
     }
     html += '</div>';
@@ -828,11 +820,7 @@ function bindItEvents() {
       const cat = IT_CATEGORIES.find((c) => c.id === catId);
       if (cat && cat.disabled) return;
       t.category = catId;
-      if (catId === 'other') {
-        t.step = 2;
-      } else {
-        t.step = 2;
-      }
+      t.step = 2;
       msg(itTicketMessage, '');
       renderItStep();
     });
@@ -1103,6 +1091,12 @@ function renderAdminTable(type, data) {
   });
 }
 
+function adminMsg(text) {
+  const el = adminContent.querySelector('.admin-msg');
+  if (el) { el.textContent = text; el.className = 'admin-msg message error'; return; }
+  adminContent.insertAdjacentHTML('afterbegin', `<p class="admin-msg message error">${esc(text)}</p>`);
+}
+
 async function handleAdminAction(e) {
   const btn = e.currentTarget;
   const action = btn.dataset.action;
@@ -1110,9 +1104,13 @@ async function handleAdminAction(e) {
   if (action === 'cancel-booking') {
     if (!confirm('Отменить бронирование?')) return;
     try {
-      await api(`/api/bookings/${btn.dataset.id}?pin=${encodeURIComponent(state.pin)}`, { method: 'DELETE' });
+      await api(`/api/bookings/${btn.dataset.id}/cancel`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin })
+      });
       loadAdminData('bookings');
-    } catch (err) { alert(err.message); }
+    } catch (err) { adminMsg(err.message); }
 
   } else if (action === 'toggle-admin') {
     try {
@@ -1122,7 +1120,7 @@ async function handleAdminAction(e) {
         body: JSON.stringify({ pin: state.pin, targetPin: btn.dataset.pin })
       });
       loadAdminData('users');
-    } catch (err) { alert(err.message); }
+    } catch (err) { adminMsg(err.message); }
 
   } else if (action === 'resolve-pin') {
     try {
@@ -1133,7 +1131,7 @@ async function handleAdminAction(e) {
       });
       loadAdminData('pin-requests');
       updatePinBadge();
-    } catch (err) { alert(err.message); }
+    } catch (err) { adminMsg(err.message); }
 
   } else if (action === 'edit-user') {
     const u = adminUsersCache.find((x) => x.pin === btn.dataset.pin);

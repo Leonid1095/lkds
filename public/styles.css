@@ -529,7 +529,6 @@ button{
   border-color:var(--accent);background:var(--accent-soft);
   transform:translateY(-1px);box-shadow:0 2px 8px rgba(17,114,182,.1);
 }
-.it-option .it-emoji{font-size:20px;flex-shrink:0}
 .it-option.disabled{
   opacity:.5;cursor:default;pointer-events:none;position:relative;
 }

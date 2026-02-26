@@ -10,4 +10,6 @@ build/
 data/users.json
 data/bookings.json
 data/tickets.json
+data/it-tickets.json
+data/pin-requests.json
 data/suggestions.json

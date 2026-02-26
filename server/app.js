@@ -125,7 +125,8 @@ async function sendEmail(to, subject, text) {
 
 /* ── CRM Bot sync config ── */
 
-const CRM_BOT_ADMIN_IDS = [1148520376, 342206882, 93676173, 6068630429];
+const CRM_BOT_ADMIN_IDS = (process.env.CRM_BOT_ADMIN_IDS || process.env.TG_ADMIN_IDS || '')
+  .split(',').map((s) => s.trim()).filter(Boolean);
 const CRM_BOT_TICKETS_FILE = path.resolve(rootDir, '../crm-support-bot/data/tickets.json');
 
 async function tgSendWithButton(botToken, chatId, text, callbackData) {
@@ -257,6 +258,21 @@ const avatarUpload = multer({
   }
 }).single('avatar');
 
+/* ── CSRF: Origin check ── */
+
+app.use((req, res, next) => {
+  if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) {
+    const origin = req.get('origin');
+    if (origin) {
+      const allowed = [publicBaseUrl, `http://localhost:${port}`];
+      if (!allowed.some((a) => origin.startsWith(a))) {
+        return res.status(403).json({ message: 'Запрос заблокирован (origin).' });
+      }
+    }
+  }
+  next();
+});
+
 /* ── Helpers ── */
 
 app.use(express.json({ limit: '1mb' }));
@@ -272,6 +288,18 @@ async function readJson(filePath, fallback) {
 
 async function writeJson(filePath, value) {
   await fs.writeFile(filePath, JSON.stringify(value, null, 2) + '\n', 'utf-8');
+}
+
+/* ── File lock (in-memory mutex for read-modify-write) ── */
+
+const _locks = new Map();
+
+async function withLock(key, fn) {
+  while (_locks.has(key)) await _locks.get(key);
+  let resolve;
+  _locks.set(key, new Promise((r) => { resolve = r; }));
+  try { return await fn(); }
+  finally { _locks.delete(key); resolve(); }
 }
 
 function isValidDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }
@@ -309,13 +337,15 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
   if (!/^\d{4}$/.test(pin))
     return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
 
-  const users = await readJson(FILES.users, {});
-  if (users[pin])
-    return res.status(400).json({ message: 'Этот пин-код уже занят. Попробуйте другой.' });
+  return withLock(FILES.users, async () => {
+    const users = await readJson(FILES.users, {});
+    if (users[pin])
+      return res.status(400).json({ message: 'Этот пин-код уже занят. Попробуйте другой.' });
 
-  users[pin] = { id: randomUUID(), fullName, contact, createdAt: new Date().toISOString() };
-  await writeJson(FILES.users, users);
-  return res.status(201).json({ pin, fullName, contact });
+    users[pin] = { id: randomUUID(), fullName, contact, createdAt: new Date().toISOString() };
+    await writeJson(FILES.users, users);
+    return res.status(201).json({ pin, fullName, contact });
+  });
 });
 
 app.post('/api/auth/login', loginLimiter, async (req, res) => {
@@ -330,7 +360,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   return res.json({
     pin, fullName: user.fullName, contact: user.contact,
     position: user.position || '', userId: user.id,
-    avatar: !!user.avatar, admin: await isAdmin(pin)
+    avatar: user.avatar || '', admin: await isAdmin(pin)
   });
 });
 
@@ -399,7 +429,7 @@ app.get('/api/profile/:pin', async (req, res) => {
 
   return res.json({
     pin: targetPin, fullName: user.fullName, contact: user.contact,
-    position: user.position || '', avatar: !!user.avatar,
+    position: user.position || '', avatar: user.avatar || '',
     userId: user.id, createdAt: user.createdAt
   });
 });
@@ -503,23 +533,25 @@ app.post('/api/bookings', async (req, res) => {
   if (!rooms.some((r) => r.id === roomId))
     return res.status(404).json({ message: 'Переговорка не найдена.' });
 
-  const bookings = await readJson(FILES.bookings, []);
-  const candidate = {
-    id: randomUUID(), roomId, date, startHour, endHour,
-    pin, fullName: user.fullName, contact: user.contact, topic,
-    createdAt: new Date().toISOString()
-  };
+  return withLock(FILES.bookings, async () => {
+    const bookings = await readJson(FILES.bookings, []);
+    const candidate = {
+      id: randomUUID(), roomId, date, startHour, endHour,
+      pin, fullName: user.fullName, contact: user.contact, topic,
+      createdAt: new Date().toISOString()
+    };
 
-  const overlap = bookings.find(
-    (b) => b.roomId === candidate.roomId && b.date === candidate.date && hasOverlap(b, candidate)
-  );
-  if (overlap)
-    return res.status(409).json({ message: 'Выбранный интервал пересекается с другой записью.' });
+    const overlap = bookings.find(
+      (b) => b.roomId === candidate.roomId && b.date === candidate.date && hasOverlap(b, candidate)
+    );
+    if (overlap)
+      return res.status(409).json({ message: 'Выбранный интервал пересекается с другой записью.' });
 
-  bookings.push(candidate);
-  await writeJson(FILES.bookings, bookings);
+    bookings.push(candidate);
+    await writeJson(FILES.bookings, bookings);
 
-  return res.status(201).json(candidate);
+    return res.status(201).json(candidate);
+  });
 });
 
 /* ── CRM Tickets ── */
@@ -778,23 +810,25 @@ app.post('/api/admin/toggle-admin', async (req, res) => {
 
 /* ── Booking cancel ── */
 
-app.delete('/api/bookings/:id', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+app.post('/api/bookings/:id/cancel', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
   const users = await readJson(FILES.users, {});
   const user = users[pin];
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
-
-  const bookings = await readJson(FILES.bookings, []);
-  const idx = bookings.findIndex((b) => b.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
-
   const admin = await isAdmin(pin);
-  if (!admin && bookings[idx].pin !== pin && bookings[idx].fullName !== user.fullName)
-    return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
 
-  bookings.splice(idx, 1);
-  await writeJson(FILES.bookings, bookings);
-  return res.json({ message: 'Бронирование отменено.' });
+  return withLock(FILES.bookings, async () => {
+    const bookings = await readJson(FILES.bookings, []);
+    const idx = bookings.findIndex((b) => b.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
+
+    if (!admin && bookings[idx].pin !== pin && bookings[idx].fullName !== user.fullName)
+      return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
+
+    bookings.splice(idx, 1);
+    await writeJson(FILES.bookings, bookings);
+    return res.json({ message: 'Бронирование отменено.' });
+  });
 });
 
 app.patch('/api/bookings/:id', async (req, res) => {
@@ -804,47 +838,49 @@ app.patch('/api/bookings/:id', async (req, res) => {
   const users = await readJson(FILES.users, {});
   const user = users[pin];
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
-
-  const bookings = await readJson(FILES.bookings, []);
-  const idx = bookings.findIndex((b) => b.id === req.params.id);
-  if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
-
-  const booking = bookings[idx];
-
   const admin = await isAdmin(pin);
-  if (!admin && booking.pin !== pin && booking.fullName !== user.fullName)
-    return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
 
-  if (isNaN(cancelHour) || cancelHour < booking.startHour || cancelHour >= booking.endHour)
-    return res.status(400).json({ message: 'Указанный слот не входит в это бронирование.' });
+  return withLock(FILES.bookings, async () => {
+    const bookings = await readJson(FILES.bookings, []);
+    const idx = bookings.findIndex((b) => b.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
 
-  const step = 0.5;
+    const booking = bookings[idx];
 
-  if (booking.endHour - booking.startHour <= step) {
-    bookings.splice(idx, 1);
-  } else if (cancelHour === booking.startHour) {
-    booking.startHour = booking.startHour + step;
-  } else if (cancelHour === booking.endHour - step) {
-    booking.endHour = booking.endHour - step;
-  } else {
-    const secondBooking = {
-      id: randomUUID(),
-      roomId: booking.roomId,
-      date: booking.date,
-      startHour: cancelHour + step,
-      endHour: booking.endHour,
-      pin: booking.pin,
-      fullName: booking.fullName,
-      contact: booking.contact,
-      topic: booking.topic,
-      createdAt: booking.createdAt
-    };
-    booking.endHour = cancelHour;
-    bookings.push(secondBooking);
-  }
+    if (!admin && booking.pin !== pin && booking.fullName !== user.fullName)
+      return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
 
-  await writeJson(FILES.bookings, bookings);
-  return res.json({ message: 'Слот отменён.' });
+    if (isNaN(cancelHour) || cancelHour < booking.startHour || cancelHour >= booking.endHour)
+      return res.status(400).json({ message: 'Указанный слот не входит в это бронирование.' });
+
+    const step = 0.5;
+
+    if (booking.endHour - booking.startHour <= step) {
+      bookings.splice(idx, 1);
+    } else if (cancelHour === booking.startHour) {
+      booking.startHour = booking.startHour + step;
+    } else if (cancelHour === booking.endHour - step) {
+      booking.endHour = booking.endHour - step;
+    } else {
+      const secondBooking = {
+        id: randomUUID(),
+        roomId: booking.roomId,
+        date: booking.date,
+        startHour: cancelHour + step,
+        endHour: booking.endHour,
+        pin: booking.pin,
+        fullName: booking.fullName,
+        contact: booking.contact,
+        topic: booking.topic,
+        createdAt: booking.createdAt
+      };
+      booking.endHour = cancelHour;
+      bookings.push(secondBooking);
+    }
+
+    await writeJson(FILES.bookings, bookings);
+    return res.json({ message: 'Слот отменён.' });
+  });
 });
 
 /* ── SPA fallback ── */
