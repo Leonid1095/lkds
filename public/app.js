@@ -310,8 +310,8 @@ async function loadApp() {
 
   try {
     const itConfig = await api('/api/it-config');
-    IT_CATEGORIES = itConfig.categories || [];
-    IT_LOCATIONS = itConfig.locations || [];
+    if (itConfig.categories) IT_CATEGORIES = itConfig.categories;
+    if (itConfig.locations) IT_LOCATIONS = itConfig.locations;
   } catch { /* fallback: сервер ещё без /api/it-config */ }
 
   renderRooms();
