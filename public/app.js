@@ -82,6 +82,10 @@ const profileContact = $('profileContact');
 const profileContactField = $('profileContactField');
 const profileDate = $('profileDate');
 const profileSaveBtn = $('profileSaveBtn');
+const profileWorkLocation = $('profileWorkLocation');
+const profileWorkLocationField = $('profileWorkLocationField');
+const profileWorkDesk = $('profileWorkDesk');
+const profileWorkDeskField = $('profileWorkDeskField');
 const profileCloseBtn = $('profileCloseBtn');
 const profileMessage = $('profileMessage');
 const profileActions = $('profileActions');
@@ -115,6 +119,7 @@ const state = {
   user: null,
   userId: null,
   isAdmin: false,
+  adminRole: null, // 'superadmin' | 'it_admin' | null
   settings: { startHour: 8, endHour: 21, slotStep: 0.5 },
   rooms: [],
   bookings: [],
@@ -180,9 +185,11 @@ async function tryAutoLogin() {
       body: JSON.stringify({ pin: saved })
     });
     state.pin = data.pin;
-    state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '' };
+    state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '',
+      workLocation: data.workLocation || '', workDesk: data.workDesk || '' };
     state.userId = data.userId;
     state.isAdmin = !!data.admin;
+    state.adminRole = data.adminRole || null;
     state.avatar = data.avatar || '';
     return true;
   } catch {
@@ -197,8 +204,12 @@ function showMain() {
   userGreeting.textContent = state.user.fullName;
   topbarAvatar.src = avatarUrl(state.avatar);
   topbarAvatar.alt = state.user.fullName;
-  if (state.isAdmin) { show(adminBtn); updatePinBadge(); }
-  else hide(adminBtn);
+  if (state.isAdmin) {
+    show(adminBtn);
+    if (state.adminRole === 'superadmin') updatePinBadge();
+  } else {
+    hide(adminBtn);
+  }
 }
 
 function showAuth() {
@@ -220,9 +231,11 @@ loginForm.addEventListener('submit', async (e) => {
       body: JSON.stringify({ pin: pinInput.value.trim() })
     });
     state.pin = data.pin;
-    state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '' };
+    state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '',
+      workLocation: data.workLocation || '', workDesk: data.workDesk || '' };
     state.userId = data.userId;
     state.isAdmin = !!data.admin;
+    state.adminRole = data.adminRole || null;
     state.avatar = data.avatar || '';
     localStorage.setItem('lkds_pin', data.pin);
     showMain();
@@ -577,6 +590,15 @@ async function openProfile(pin) {
     profileContact.value = data.contact || '';
     profileDate.textContent = fmtDate(data.createdAt);
 
+    // Workplace fields
+    profileWorkLocation.innerHTML = '<option value="">Не указано</option>' +
+      IT_LOCATIONS.map((l) => `<option value="${esc(l)}"${l === data.workLocation ? ' selected' : ''}>${esc(l)}</option>`).join('');
+    profileWorkDesk.value = data.workDesk || '';
+
+    // Show/hide desk field based on location
+    const showDesk = data.workLocation === 'Офис 2 этаж';
+    if (showDesk) show(profileWorkDeskField); else hide(profileWorkDeskField);
+
     msg(avatarUploadMessage, '');
     hide(avatarUploadProgress);
     show(avatarUploadContent);
@@ -585,13 +607,19 @@ async function openProfile(pin) {
     if (isOwn) {
       show(profileAvatarUploadZone);
       show(profileSaveBtn);
+      show(profileWorkLocationField);
       profilePosition.removeAttribute('readonly');
       profileContact.removeAttribute('readonly');
+      profileWorkLocation.removeAttribute('disabled');
+      profileWorkDesk.removeAttribute('readonly');
     } else {
       hide(profileAvatarUploadZone);
       hide(profileSaveBtn);
+      if (data.workLocation) show(profileWorkLocationField); else hide(profileWorkLocationField);
       profilePosition.setAttribute('readonly', '');
       profileContact.setAttribute('readonly', '');
+      profileWorkLocation.setAttribute('disabled', '');
+      profileWorkDesk.setAttribute('readonly', '');
     }
 
     show(profilePopup);
@@ -603,6 +631,11 @@ async function openProfile(pin) {
 profileCloseBtn.addEventListener('click', () => hide(profilePopup));
 profilePopup.addEventListener('click', (e) => { if (e.target === profilePopup) hide(profilePopup); });
 
+profileWorkLocation.addEventListener('change', () => {
+  if (profileWorkLocation.value === 'Офис 2 этаж') show(profileWorkDeskField);
+  else { hide(profileWorkDeskField); profileWorkDesk.value = ''; }
+});
+
 profileSaveBtn.addEventListener('click', async () => {
   msg(profileMessage, '');
   try {
@@ -612,11 +645,15 @@ profileSaveBtn.addEventListener('click', async () => {
       body: JSON.stringify({
         pin: state.pin,
         contact: profileContact.value.trim(),
-        position: profilePosition.value.trim()
+        position: profilePosition.value.trim(),
+        workLocation: profileWorkLocation.value,
+        workDesk: profileWorkDesk.value.trim()
       })
     });
     state.user.contact = result.contact;
     state.user.position = result.position;
+    state.user.workLocation = result.workLocation || '';
+    state.user.workDesk = result.workDesk || '';
     msg(profileMessage, result.message, 'success');
   } catch (err) {
     msg(profileMessage, err.message, 'error');
@@ -734,7 +771,7 @@ ticketForm.addEventListener('submit', async (e) => {
 /* ── IT Wizard ── */
 
 function resetItWizard() {
-  state.itTicket = { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' };
+  state.itTicket = { step: 1, category: null, subcategory: null, location: null, seat: '', description: '', _showAllLocations: false };
   msg(itTicketMessage, '');
   renderItStep();
 }
@@ -796,14 +833,26 @@ function renderItStep() {
     }
 
   } else if (step === 3) {
-    html += `<p class="it-step-title">Где возникла проблема?</p><div class="it-options">`;
-    for (const loc of IT_LOCATIONS) {
-      html += `<button class="it-option" data-loc="${esc(loc)}">
-        ${esc(loc)}
-      </button>`;
+    const profLoc = state.user?.workLocation;
+    const profDesk = state.user?.workDesk;
+    if (profLoc && !t._showAllLocations) {
+      html += `<p class="it-step-title">Где возникла проблема?</p>`;
+      html += `<div class="it-profile-loc">Из профиля: <strong>${esc(profLoc)}${profDesk ? ' (место ' + esc(profDesk) + ')' : ''}</strong></div>`;
+      html += `<div class="it-options">`;
+      html += `<button class="it-option" data-loc="${esc(profLoc)}" data-desk="${esc(profDesk || '')}">Да, ${esc(profLoc)}</button>`;
+      html += `<button class="it-option" id="itChooseOtherLoc">Другое место</button>`;
+      html += `</div>`;
+      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
+    } else {
+      html += `<p class="it-step-title">Где возникла проблема?</p><div class="it-options">`;
+      for (const loc of IT_LOCATIONS) {
+        html += `<button class="it-option" data-loc="${esc(loc)}">
+          ${esc(loc)}
+        </button>`;
+      }
+      html += '</div>';
+      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
     }
-    html += '</div>';
-    html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
 
   } else if (step === 4) {
     html += `<p class="it-step-title">Укажите номер места</p>`;
@@ -875,7 +924,11 @@ function bindItEvents() {
   itWizard.querySelectorAll('[data-loc]').forEach((btn) => {
     btn.addEventListener('click', () => {
       t.location = btn.dataset.loc;
-      if (t.location === 'Офис 2 этаж') {
+      // If desk pre-filled from profile
+      if (btn.dataset.desk) {
+        t.seat = btn.dataset.desk;
+        t.step = 5;
+      } else if (t.location === 'Офис 2 этаж') {
         t.step = 4;
       } else {
         t.seat = '';
@@ -885,6 +938,16 @@ function bindItEvents() {
       renderItStep();
     });
   });
+
+  // "Choose other location" button (when profile location suggested)
+  const otherLocBtn = document.getElementById('itChooseOtherLoc');
+  if (otherLocBtn) {
+    otherLocBtn.addEventListener('click', () => {
+      t._showAllLocations = true;
+      msg(itTicketMessage, '');
+      renderItStep();
+    });
+  }
 
   // Step 4: seat number
   const seatNext = $('itSeatNext');
@@ -945,6 +1008,7 @@ function bindItEvents() {
         t.location = null;
         t.step = 3;
       } else if (t.step === 3) {
+        if (t._showAllLocations) { t._showAllLocations = false; renderItStep(); return; }
         t.subcategory = null;
         t.location = null;
         if (t.category === 'other') { t.description = ''; }
@@ -984,8 +1048,27 @@ adminBtn.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
   $('panelAdmin').classList.add('active');
-  loadAdminData('bookings');
-  updatePinBadge();
+
+  // Filter admin tabs by role
+  const allAdminTabs = document.querySelectorAll('.admin-tab');
+  const superOnly = ['bookings', 'tickets', 'suggestions', 'users', 'pin-requests'];
+  allAdminTabs.forEach((tab) => {
+    if (state.adminRole === 'it_admin' && superOnly.includes(tab.dataset.atab)) {
+      hide(tab);
+    } else {
+      show(tab);
+    }
+  });
+
+  if (state.adminRole === 'it_admin') {
+    allAdminTabs.forEach((t) => t.classList.remove('active'));
+    const itTab = [...allAdminTabs].find((t) => t.dataset.atab === 'it-tickets');
+    if (itTab) itTab.classList.add('active');
+    loadAdminData('it-tickets');
+  } else {
+    loadAdminData('bookings');
+    updatePinBadge();
+  }
 });
 
 document.querySelectorAll('.admin-tab').forEach((tab) => {
@@ -1080,15 +1163,22 @@ function renderAdminTable(type, data) {
       </tr>`;
     }
   } else if (type === 'users') {
-    html += '<tr><th>Пин</th><th>ФИО</th><th>Контакт</th><th>Админ</th><th>Дата</th><th></th></tr>';
+    html += '<tr><th>Пин</th><th>ФИО</th><th>Контакт</th><th>Роль</th><th>Дата</th><th></th></tr>';
+    const roleLabels = { superadmin: 'Суперадмин', it_admin: 'ИТ-админ', employee: 'Сотрудник' };
     for (const u of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
-      const adminLabel = u.isAdmin ? 'Да' : 'Нет';
-      const adminClass = u.isAdmin ? 'btn-toggle-admin active' : 'btn-toggle-admin';
+      const role = u.role || 'employee';
+      const roleLabel = roleLabels[role] || 'Сотрудник';
       html += `<tr>
         <td>${esc(u.pin)}</td>
         <td>${esc(u.fullName)}</td>
         <td>${esc(u.contact)}</td>
-        <td><button class="${adminClass}" data-action="toggle-admin" data-pin="${esc(u.pin)}">${adminLabel}</button></td>
+        <td>
+          <select class="role-select" data-action="set-role" data-pin="${esc(u.pin)}">
+            <option value="employee"${role === 'employee' ? ' selected' : ''}>Сотрудник</option>
+            <option value="it_admin"${role === 'it_admin' ? ' selected' : ''}>ИТ-админ</option>
+            <option value="superadmin"${role === 'superadmin' ? ' selected' : ''}>Суперадмин</option>
+          </select>
+        </td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
         <td><button class="btn-edit-user" data-action="edit-user" data-pin="${esc(u.pin)}">Ред.</button></td>
       </tr>`;
@@ -1109,8 +1199,12 @@ function renderAdminTable(type, data) {
   adminContent.innerHTML = html;
 
   // Event delegation for admin actions
-  adminContent.querySelectorAll('[data-action]').forEach((btn) => {
-    btn.addEventListener('click', handleAdminAction);
+  adminContent.querySelectorAll('[data-action]').forEach((el) => {
+    if (el.tagName === 'SELECT') {
+      el.addEventListener('change', handleAdminAction);
+    } else {
+      el.addEventListener('click', handleAdminAction);
+    }
   });
 }
 
@@ -1135,12 +1229,13 @@ async function handleAdminAction(e) {
       loadAdminData('bookings');
     } catch (err) { adminMsg(err.message); }
 
-  } else if (action === 'toggle-admin') {
+  } else if (action === 'set-role') {
+    const role = btn.value;
     try {
-      await api('/api/admin/toggle-admin', {
+      await api('/api/admin/set-role', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, targetPin: btn.dataset.pin })
+        body: JSON.stringify({ pin: state.pin, targetPin: btn.dataset.pin, role })
       });
       loadAdminData('users');
     } catch (err) { adminMsg(err.message); }

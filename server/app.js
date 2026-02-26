@@ -345,10 +345,24 @@ function hasOverlap(a, b) {
 
 function clip(str, max) { return str.length > max ? str.slice(0, max) : str; }
 
+async function getUserRole(pin, user) {
+  if (ADMIN_PINS.has(pin)) return 'superadmin';
+  if (!user) return null;
+  if (user.role === 'superadmin' || user.role === 'it_admin') return user.role;
+  if (user.isAdmin) return 'superadmin'; // backward compat
+  return null;
+}
+
 async function isAdmin(pin) {
-  if (ADMIN_PINS.has(pin)) return true;
   const users = await readJson(FILES.users, {});
-  return !!(users[pin] && users[pin].isAdmin);
+  const role = await getUserRole(pin, users[pin]);
+  return !!role;
+}
+
+async function isSuperAdmin(pin) {
+  const users = await readJson(FILES.users, {});
+  const role = await getUserRole(pin, users[pin]);
+  return role === 'superadmin';
 }
 
 /* ── Auth ── */
@@ -385,10 +399,12 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   const user = users[pin];
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
 
+  const adminRole = await getUserRole(pin, users[pin]);
   return res.json({
     pin, fullName: user.fullName, contact: user.contact,
     position: user.position || '', userId: user.id,
-    avatar: user.avatar || '', admin: await isAdmin(pin)
+    avatar: user.avatar || '', admin: !!adminRole, adminRole: adminRole || null,
+    workLocation: user.workLocation || '', workDesk: user.workDesk || ''
   });
 });
 
@@ -458,7 +474,8 @@ app.get('/api/profile/:pin', async (req, res) => {
   return res.json({
     pin: targetPin, fullName: user.fullName, contact: user.contact,
     position: user.position || '', avatar: user.avatar || '',
-    userId: user.id, createdAt: user.createdAt
+    userId: user.id, createdAt: user.createdAt,
+    workLocation: user.workLocation || '', workDesk: user.workDesk || ''
   });
 });
 
@@ -466,15 +483,23 @@ app.post('/api/profile/update', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const contact = clip(String(req.body.contact || '').trim(), 200);
   const position = clip(String(req.body.position || '').trim(), 100);
+  const workLocation = req.body.workLocation !== undefined ? clip(String(req.body.workLocation || '').trim(), 100) : undefined;
+  const workDesk = req.body.workDesk !== undefined ? clip(String(req.body.workDesk || '').trim(), 10) : undefined;
 
   const users = await readJson(FILES.users, {});
   if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
 
   if (contact && contact.length >= 3) users[pin].contact = contact;
   if (position !== undefined) users[pin].position = position;
+  if (workLocation !== undefined) users[pin].workLocation = workLocation;
+  if (workDesk !== undefined) users[pin].workDesk = workDesk;
 
   await writeJson(FILES.users, users);
-  return res.json({ message: 'Профиль обновлён.', contact: users[pin].contact, position: users[pin].position || '' });
+  return res.json({
+    message: 'Профиль обновлён.', contact: users[pin].contact,
+    position: users[pin].position || '',
+    workLocation: users[pin].workLocation || '', workDesk: users[pin].workDesk || ''
+  });
 });
 
 app.post('/api/profile/avatar', (req, res) => {
@@ -863,18 +888,20 @@ app.post('/api/suggestions', async (req, res) => {
 
 /* ── Admin API (POST for security — pins not in URL) ── */
 
+// superadmin-only endpoints
 app.post('/api/admin/bookings', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.bookings, []));
 });
 
 app.post('/api/admin/tickets', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.tickets, []));
 });
 
+// IT tickets — accessible by both superadmin and it_admin
 app.post('/api/admin/it-tickets', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
@@ -883,20 +910,20 @@ app.post('/api/admin/it-tickets', async (req, res) => {
 
 app.post('/api/admin/suggestions', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.suggestions, []));
 });
 
 app.post('/api/admin/pin-requests', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   return res.json(await readJson(FILES.pinRequests, []));
 });
 
 app.post('/api/admin/pin-request-resolve', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const requestId = String(req.body.requestId || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const requests = await readJson(FILES.pinRequests, []);
   const idx = requests.findIndex((r) => r.id === requestId);
@@ -909,14 +936,15 @@ app.post('/api/admin/pin-request-resolve', async (req, res) => {
 
 app.post('/api/admin/users', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   const users = await readJson(FILES.users, {});
   const list = [];
   for (const [p, u] of Object.entries(users)) {
+    const role = await getUserRole(p, u);
     list.push({
       pin: p, fullName: u.fullName, contact: u.contact,
       position: u.position || '', avatar: !!u.avatar,
-      isAdmin: ADMIN_PINS.has(p) || !!u.isAdmin, createdAt: u.createdAt
+      isAdmin: !!role, role: role || 'employee', createdAt: u.createdAt
     });
   }
   return res.json(list);
@@ -929,7 +957,7 @@ app.post('/api/admin/update-user', async (req, res) => {
   const contact = clip(String(req.body.contact || '').trim(), 200);
   const newPin = String(req.body.newPin || '').trim();
 
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
 
   const users = await readJson(FILES.users, {});
@@ -963,7 +991,7 @@ app.post('/api/admin/update-user', async (req, res) => {
 app.post('/api/admin/toggle-admin', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const targetPin = String(req.body.targetPin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
 
   const users = await readJson(FILES.users, {});
@@ -972,6 +1000,31 @@ app.post('/api/admin/toggle-admin', async (req, res) => {
   users[targetPin].isAdmin = !users[targetPin].isAdmin;
   await writeJson(FILES.users, users);
   return res.json({ pin: targetPin, isAdmin: !!users[targetPin].isAdmin });
+});
+
+app.post('/api/admin/set-role', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const targetPin = String(req.body.targetPin || '').trim();
+  const role = String(req.body.role || '').trim();
+
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
+  if (!['superadmin', 'it_admin', 'employee'].includes(role))
+    return res.status(400).json({ message: 'Роль: superadmin, it_admin или employee.' });
+
+  const users = await readJson(FILES.users, {});
+  if (!users[targetPin]) return res.status(404).json({ message: 'Пользователь не найден.' });
+
+  if (role === 'employee') {
+    delete users[targetPin].role;
+    users[targetPin].isAdmin = false;
+  } else {
+    users[targetPin].role = role;
+    users[targetPin].isAdmin = true;
+  }
+
+  await writeJson(FILES.users, users);
+  return res.json({ pin: targetPin, role });
 });
 
 /* ── Booking cancel ── */
