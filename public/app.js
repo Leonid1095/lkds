@@ -91,10 +91,22 @@ const itWizard = $('itWizard');
 const itTicketMessage = $('itTicketMessage');
 const adminContent = $('adminContent');
 
-/* ── IT config (loaded from API) ── */
+/* ── IT config (loaded from API, fallback hardcoded) ── */
 
-let IT_CATEGORIES = [];
-let IT_LOCATIONS = [];
+let IT_CATEGORIES = [
+  { id: 'software', label: 'ПО/установка',
+    subcategories: ['Установить/обновить программу', 'Лицензия/активация', 'Ошибка/вылетает', 'Печать/принтер'] },
+  { id: 'hardware', label: 'Компьютер/ноутбук',
+    subcategories: ['Тормозит/зависает', 'Не включается', 'Клавиатура/мышь/монитор'] },
+  { id: 'network', label: 'Интернет/сеть',
+    subcategories: ['Wi-Fi не работает', 'Нет интернета', 'Низкая скорость'] },
+  { id: 'vks', label: 'ВКС/Презентация', disabled: true, subcategories: [] },
+  { id: 'other', label: 'Другое', subcategories: [] }
+];
+let IT_LOCATIONS = [
+  'Модуль ЖД', 'Модуль КП', 'Офис 2 этаж',
+  'Диспетчерская', 'Диспетчеры и операторы КП', 'Приемосдатчик'
+];
 
 /* ── State ── */
 const state = {
@@ -289,14 +301,18 @@ forgotPinSend.addEventListener('click', async () => {
 /* ── Load app ── */
 
 async function loadApp() {
-  const [settings, rooms, links, crmConfig, itConfig] = await Promise.all([
-    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config'), api('/api/it-config')
+  const [settings, rooms, links, crmConfig] = await Promise.all([
+    api('/api/settings'), api('/api/rooms'), api('/api/links'), api('/api/crm-config')
   ]);
   state.settings = settings;
   state.rooms = rooms;
   state.crmConfig = crmConfig;
-  IT_CATEGORIES = itConfig.categories || [];
-  IT_LOCATIONS = itConfig.locations || [];
+
+  try {
+    const itConfig = await api('/api/it-config');
+    IT_CATEGORIES = itConfig.categories || [];
+    IT_LOCATIONS = itConfig.locations || [];
+  } catch { /* fallback: сервер ещё без /api/it-config */ }
 
   renderRooms();
   renderLinks(links);
