@@ -89,6 +89,7 @@ const profileActions = $('profileActions');
 const linksGrid = $('linksGrid');
 const itWizard = $('itWizard');
 const itTicketMessage = $('itTicketMessage');
+const myItTicketsList = $('myItTicketsList');
 const adminContent = $('adminContent');
 
 /* ── IT config (loaded from API, fallback hardcoded) ── */
@@ -318,6 +319,7 @@ async function loadApp() {
   renderLinks(links);
   renderCrmConfig();
   resetItWizard();
+  loadMyItTickets();
 
   dateInput.value = getToday();
   await loadBookings();
@@ -922,6 +924,7 @@ function bindItEvents() {
           })
         });
         msg(itTicketMessage, result.message, 'success');
+        loadMyItTickets();
         setTimeout(() => resetItWizard(), 2000);
       } catch (err) {
         msg(itTicketMessage, err.message, 'error');
@@ -1050,8 +1053,10 @@ function renderAdminTable(type, data) {
       </tr>`;
     }
   } else if (type === 'it-tickets') {
-    html += '<tr><th>Дата</th><th>Категория</th><th>Тип проблемы</th><th>Локация</th><th>Место</th><th>Описание</th><th>Кто</th></tr>';
+    html += '<tr><th>Дата</th><th>Категория</th><th>Тип проблемы</th><th>Локация</th><th>Место</th><th>Описание</th><th>Кто</th><th>Статус</th><th>Оценка</th></tr>';
     for (const t of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+      const statusBadge = itStatusBadge(t.status);
+      const ratingStr = t.rating ? '★'.repeat(t.rating) + '☆'.repeat(5 - t.rating) : '—';
       html += `<tr>
         <td style="white-space:nowrap">${fmtDate(t.createdAt)}</td>
         <td>${esc(t.category)}</td>
@@ -1060,6 +1065,8 @@ function renderAdminTable(type, data) {
         <td>${esc(t.seat || '—')}</td>
         <td class="desc-cell">${esc(t.description)}</td>
         <td>${esc(t.fullName)}</td>
+        <td>${statusBadge}</td>
+        <td style="white-space:nowrap">${ratingStr}</td>
       </tr>`;
     }
   } else if (type === 'suggestions') {
@@ -1188,12 +1195,194 @@ editUserForm.addEventListener('submit', async (e) => {
   }
 });
 
+/* ── IT Status helpers ── */
+
+function itStatusBadge(status) {
+  const map = {
+    new: ['Новая', 'status-new'],
+    in_progress: ['В работе', 'status-progress'],
+    done: ['Выполнено', 'status-done']
+  };
+  const [label, cls] = map[status] || ['Новая', 'status-new'];
+  return `<span class="it-status-badge ${cls}">${label}</span>`;
+}
+
+/* ── My IT Tickets ── */
+
+async function loadMyItTickets() {
+  if (!state.pin) return;
+  try {
+    const tickets = await api('/api/my-it-tickets', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
+    renderMyItTickets(tickets);
+  } catch {
+    if (myItTicketsList) myItTicketsList.innerHTML = '';
+  }
+}
+
+function renderMyItTickets(tickets) {
+  if (!myItTicketsList) return;
+  if (!tickets.length) {
+    myItTicketsList.innerHTML = '<p class="my-it-empty">Вы пока не подавали ИТ-заявок</p>';
+    return;
+  }
+  myItTicketsList.innerHTML = tickets.map((t) => {
+    const badge = itStatusBadge(t.status);
+    const date = fmtDate(t.createdAt);
+    const desc = t.description.length > 80 ? t.description.slice(0, 80) + '...' : t.description;
+    let ratingHtml = '';
+    if (t.status === 'done' && t.rating) {
+      ratingHtml = `<span class="it-rating-done">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span>`;
+    } else if (t.status === 'done' && !t.rating) {
+      ratingHtml = `<span class="it-stars" data-ticket-id="${esc(t.id)}">${[1,2,3,4,5].map((n) =>
+        `<span class="it-star" data-star="${n}">★</span>`
+      ).join('')}</span>`;
+    }
+    const takenBy = t.takenBy ? ` · ${esc(t.takenBy)}` : '';
+    return `<div class="my-it-ticket">
+      <div class="my-it-ticket-header">
+        <span class="my-it-ticket-cat">${esc(t.category)}${t.subcategory && t.subcategory !== '—' ? ' — ' + esc(t.subcategory) : ''}</span>
+        <span class="my-it-ticket-date">${date}</span>
+      </div>
+      <div class="my-it-ticket-body">${esc(desc)}</div>
+      <div class="my-it-ticket-footer">
+        ${badge}${takenBy}
+        ${ratingHtml}
+      </div>
+    </div>`;
+  }).join('');
+
+  // Bind star rating events
+  myItTicketsList.querySelectorAll('.it-stars').forEach((starsEl) => {
+    const ticketId = starsEl.dataset.ticketId;
+    const stars = starsEl.querySelectorAll('.it-star');
+    stars.forEach((star) => {
+      star.addEventListener('mouseenter', () => {
+        const val = Number(star.dataset.star);
+        stars.forEach((s) => s.classList.toggle('hovered', Number(s.dataset.star) <= val));
+      });
+      star.addEventListener('mouseleave', () => {
+        stars.forEach((s) => s.classList.remove('hovered'));
+      });
+      star.addEventListener('click', () => rateItTicket(ticketId, Number(star.dataset.star)));
+    });
+  });
+}
+
+async function rateItTicket(ticketId, rating) {
+  try {
+    const result = await api('/api/it-ticket-rate', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, ticketId, rating })
+    });
+    msg(itTicketMessage, result.message, 'success');
+    loadMyItTickets();
+  } catch (err) {
+    msg(itTicketMessage, err.message, 'error');
+  }
+}
+
+/* ── IT Status page (standalone, for sysadmin) ── */
+
+function renderItStatusPage(ticketId) {
+  document.title = 'ИТ-заявка — Статус';
+  document.body.innerHTML = `<div class="it-status-page"><div class="it-status-card" id="itStatusCard">
+    <h2>🔧 ИТ-заявка</h2>
+    <p style="color:var(--text-sec)">Загрузка...</p>
+  </div></div>`;
+  loadItStatus(ticketId);
+}
+
+async function loadItStatus(ticketId) {
+  const card = document.getElementById('itStatusCard');
+  try {
+    const t = await api(`/api/it-ticket-status/${ticketId}`);
+    const badge = itStatusBadge(t.status);
+    const date = fmtDate(t.createdAt);
+    let actionsHtml = '';
+    if (t.status === 'new') {
+      actionsHtml = `
+        <input id="itTakenByInput" class="it-taken-input" placeholder="Ваше имя (необязательно)" />
+        <div class="it-status-actions">
+          <button class="btn-primary" id="itTakeBtn">Взять в работу</button>
+        </div>`;
+    } else if (t.status === 'in_progress') {
+      actionsHtml = `<div class="it-status-actions">
+        <button class="btn-primary" id="itDoneBtn">Выполнено</button>
+      </div>`;
+    }
+
+    card.innerHTML = `
+      <h2>🔧 ИТ-заявка</h2>
+      <div class="it-status-field"><span class="it-status-label">Категория</span><span class="it-status-value">${esc(t.category)}${t.subcategory && t.subcategory !== '—' ? ' — ' + esc(t.subcategory) : ''}</span></div>
+      <div class="it-status-field"><span class="it-status-label">Локация</span><span class="it-status-value">${esc(t.location)}${t.seat ? ' (место ' + esc(t.seat) + ')' : ''}</span></div>
+      <div class="it-status-field"><span class="it-status-label">Описание</span><span class="it-status-value">${esc(t.description)}</span></div>
+      <div class="it-status-field"><span class="it-status-label">От</span><span class="it-status-value">${esc(t.fullName)} (${esc(t.contact)})</span></div>
+      <div class="it-status-field"><span class="it-status-label">Создана</span><span class="it-status-value">${date}</span></div>
+      <div class="it-status-field"><span class="it-status-label">Статус</span><span class="it-status-value">${badge}${t.takenBy ? ' · ' + esc(t.takenBy) : ''}</span></div>
+      ${t.rating ? `<div class="it-status-field"><span class="it-status-label">Оценка</span><span class="it-status-value">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span></div>` : ''}
+      ${actionsHtml}
+      <p class="it-status-msg" id="itStatusMsg"></p>`;
+
+    const takeBtn = document.getElementById('itTakeBtn');
+    if (takeBtn) {
+      takeBtn.addEventListener('click', async () => {
+        const takenBy = (document.getElementById('itTakenByInput')?.value || '').trim();
+        takeBtn.disabled = true;
+        try {
+          await api(`/api/it-ticket-status/${ticketId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'take', takenBy })
+          });
+          loadItStatus(ticketId);
+        } catch (err) {
+          const m = document.getElementById('itStatusMsg');
+          if (m) { m.textContent = err.message; m.className = 'it-status-msg error'; }
+          takeBtn.disabled = false;
+        }
+      });
+    }
+
+    const doneBtn = document.getElementById('itDoneBtn');
+    if (doneBtn) {
+      doneBtn.addEventListener('click', async () => {
+        doneBtn.disabled = true;
+        try {
+          await api(`/api/it-ticket-status/${ticketId}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action: 'done' })
+          });
+          loadItStatus(ticketId);
+        } catch (err) {
+          const m = document.getElementById('itStatusMsg');
+          if (m) { m.textContent = err.message; m.className = 'it-status-msg error'; }
+          doneBtn.disabled = false;
+        }
+      });
+    }
+  } catch (err) {
+    card.innerHTML = `<h2>🔧 ИТ-заявка</h2><p class="it-status-msg error">${esc(err.message)}</p>`;
+  }
+}
+
 /* ── Init ── */
 
-resetItWizard();
+// Check if this is the standalone IT status page
+const itStatusMatch = location.pathname.match(/^\/it-status\/([0-9a-f-]{36})$/);
+if (itStatusMatch) {
+  renderItStatusPage(itStatusMatch[1]);
+} else {
+  resetItWizard();
 
-(async () => {
-  const loggedIn = await tryAutoLogin();
-  if (loggedIn) { showMain(); await loadApp(); }
-  else { showAuth(); }
-})();
+  (async () => {
+    const loggedIn = await tryAutoLogin();
+    if (loggedIn) { showMain(); await loadApp(); }
+    else { showAuth(); }
+  })();
+}

@@ -577,6 +577,89 @@ button{
   box-shadow:0 4px 12px rgba(14,33,86,.3);
 }
 
+/* ── IT Status badges ── */
+
+.it-status-badge{
+  display:inline-block;font-size:11px;font-weight:700;
+  padding:3px 10px;border-radius:8px;white-space:nowrap;
+}
+.status-new{background:#fefcbf;color:#975a16}
+.status-progress{background:var(--accent-soft);color:var(--accent)}
+.status-done{background:var(--ok-soft);color:var(--ok)}
+
+/* ── My IT tickets ── */
+
+.my-it-tickets-title{
+  margin:0 0 12px;font-size:16px;font-weight:700;color:var(--text);
+}
+
+.my-it-ticket{
+  padding:14px 16px;border:1.5px solid var(--border);border-radius:12px;
+  margin-bottom:10px;background:#fff;transition:all .2s;
+}
+.my-it-ticket:hover{border-color:var(--accent);box-shadow:0 2px 8px rgba(17,114,182,.08)}
+
+.my-it-ticket-header{
+  display:flex;justify-content:space-between;align-items:center;gap:8px;
+  margin-bottom:6px;
+}
+.my-it-ticket-cat{font-weight:700;font-size:14px;color:var(--text)}
+.my-it-ticket-date{font-size:12px;color:var(--text-sec);white-space:nowrap}
+
+.my-it-ticket-body{font-size:13px;color:var(--text-sec);margin-bottom:8px}
+
+.my-it-ticket-footer{
+  display:flex;align-items:center;gap:10px;flex-wrap:wrap;
+}
+
+/* ── IT Star rating ── */
+
+.it-stars{display:inline-flex;gap:2px;cursor:pointer}
+.it-star{
+  font-size:22px;color:var(--border);transition:color .15s,transform .15s;
+  cursor:pointer;line-height:1;user-select:none;
+}
+.it-star:hover,.it-star.hovered{color:#f6ad55;transform:scale(1.15)}
+.it-star.active{color:#ed8936}
+.it-stars-readonly .it-star{cursor:default}
+.it-stars-readonly .it-star:hover{transform:none}
+.it-rating-done{font-size:12px;color:var(--ok);font-weight:600}
+
+/* ── IT Status page (standalone for sysadmin) ── */
+
+.it-status-page{
+  min-height:100vh;display:flex;align-items:center;justify-content:center;
+  padding:24px;background:linear-gradient(135deg,#0e2156 0%,#1172b6 100%);
+}
+.it-status-card{
+  background:var(--card);border-radius:20px;padding:32px;
+  width:100%;max-width:500px;box-shadow:var(--shadow-lg);
+}
+.it-status-card h2{
+  margin:0 0 20px;font-size:20px;color:var(--primary);
+  display:flex;align-items:center;gap:8px;
+}
+.it-status-field{
+  display:flex;flex-direction:column;gap:2px;margin-bottom:12px;
+}
+.it-status-label{font-size:11px;font-weight:700;color:var(--text-sec);text-transform:uppercase;letter-spacing:.5px}
+.it-status-value{font-size:14px;color:var(--text)}
+.it-status-actions{display:flex;gap:10px;margin-top:20px}
+.it-status-actions button{flex:1}
+
+.it-status-msg{min-height:20px;margin-top:12px;font-size:13px}
+.it-status-msg.success{color:var(--ok)}
+.it-status-msg.error{color:var(--danger)}
+
+.it-taken-input{
+  border-radius:10px;border:1.5px solid var(--border);
+  padding:10px 12px;font:inherit;font-size:14px;color:var(--text);
+  background:#fff;transition:border-color .2s;width:100%;margin-bottom:8px;
+}
+.it-taken-input:focus{outline:none;border-color:var(--accent)}
+
+.my-it-empty{text-align:center;color:var(--disabled);padding:20px 0;font-size:13px}
+
 /* ── Responsive: Tablet ── */
 
 @media(max-width:740px){
@@ -674,6 +757,13 @@ button{
   .btn-cancel-sm,.btn-toggle-admin,.btn-edit-user{padding:3px 8px;font-size:11px}
 
   .cancel-actions button{font-size:13px;padding:10px 14px}
+
+  .it-status-page{padding:12px}
+  .it-status-card{padding:22px;border-radius:16px}
+  .it-status-card h2{font-size:17px}
+  .my-it-ticket{padding:12px 14px}
+  .my-it-ticket-cat{font-size:13px}
+  .it-star{font-size:20px}
 
   .avatar-upload-zone{padding:12px 8px}
   .avatar-upload-text{font-size:12px}

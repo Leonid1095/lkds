@@ -8,6 +8,7 @@ import path from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 import { createTransport } from 'nodemailer';
+import ExcelJS from 'exceljs';
 
 dotenv.config();
 
@@ -22,6 +23,7 @@ const app = express();
 app.set('trust proxy', 1);
 const port = Number(process.env.PORT) || 3000;
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'https://lkds-room.duckdns.org';
+const IT_API_URL = process.env.IT_API_URL || '';
 const SUGGESTION_EMAIL = 'ymerchii@yandex.ru';
 
 const ADMIN_PINS = new Set(
@@ -128,6 +130,32 @@ async function sendEmail(to, subject, text) {
 const CRM_BOT_ADMIN_IDS = (process.env.CRM_BOT_ADMIN_IDS || process.env.TG_ADMIN_IDS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
 const CRM_BOT_TICKETS_FILE = path.resolve(rootDir, '../crm-support-bot/data/tickets.json');
+const CRM_BOT_EXCEL_FILE = path.resolve(rootDir, '../crm-support-bot/data/crm_support_log.xlsx');
+
+const EXCEL_HEADERS = ['Дата и время', 'Telegram ID', 'ФИО', 'Модуль', 'Тип обращения', 'Категория ошибки', 'Описание'];
+const EXCEL_COL_WIDTHS = [20, 14, 25, 22, 20, 30, 60];
+const EXCEL_SHEET_NAME = 'Обращения';
+
+async function appendToBotExcel(row) {
+  let wb;
+  try {
+    wb = new ExcelJS.Workbook();
+    await wb.xlsx.readFile(CRM_BOT_EXCEL_FILE);
+  } catch {
+    wb = new ExcelJS.Workbook();
+  }
+
+  let ws = wb.getWorksheet(EXCEL_SHEET_NAME);
+  if (!ws) {
+    ws = wb.addWorksheet(EXCEL_SHEET_NAME);
+    const headerRow = ws.addRow(EXCEL_HEADERS);
+    headerRow.font = { bold: true };
+    EXCEL_COL_WIDTHS.forEach((w, i) => { ws.getColumn(i + 1).width = w; });
+  }
+
+  ws.addRow(row);
+  await wb.xlsx.writeFile(CRM_BOT_EXCEL_FILE);
+}
 
 async function tgSendWithButton(botToken, chatId, text, callbackData) {
   if (!botToken) return null;
@@ -140,7 +168,7 @@ async function tgSendWithButton(botToken, chatId, text, callbackData) {
         text,
         parse_mode: 'HTML',
         reply_markup: {
-          inline_keyboard: [[{ text: '✅ Взять в работу', callback_data: callbackData }]]
+          inline_keyboard: [[{ text: '🙋 Взять в работу', callback_data: callbackData }]]
         }
       })
     });
@@ -589,16 +617,20 @@ app.post('/api/tickets', async (req, res) => {
 
   /* ── Sync to crm-support-bot ── */
   const botType = type === 'error' ? 'Ошибка' : 'Предложение';
+  const botEmoji = type === 'error' ? '🚨' : '💡';
   const botCategory = type === 'error' ? category : '—';
   try {
     const tid = await createBotTicket(botType, user.fullName, module, botCategory, description);
 
-    const tgText =
-      `🚨 Новая заявка #${tid}: ${botType}\n` +
-      `👤 ${user.fullName}\n` +
-      `📦 ${module}\n` +
-      `📂 ${botCategory}\n` +
-      `💬 ${description}`;
+    // Format matching bot.py _ticket_text()
+    const tgLines = [
+      `${botEmoji} <b>Новая заявка #${tid}: ${botType}</b>\n`,
+      `👤 ${user.fullName}`,
+      `📦 ${module}`
+    ];
+    if (botCategory && botCategory !== '—') tgLines.push(`📂 ${botCategory}`);
+    tgLines.push(`💬 ${description}`);
+    const tgText = tgLines.join('\n');
 
     const adminMessages = {};
     for (const adminId of CRM_BOT_ADMIN_IDS) {
@@ -612,6 +644,12 @@ app.post('/api/tickets', async (req, res) => {
       store.items[String(tid)].admin_messages = adminMessages;
       await writeJson(CRM_BOT_TICKETS_FILE, store);
     }
+
+    // Append to bot Excel log
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+    await appendToBotExcel([ts, 'portal', user.fullName, module, botType, botCategory, description]);
   } catch (err) {
     console.error('CRM bot sync failed:', err.message);
   }
@@ -649,27 +687,155 @@ app.post('/api/it-tickets', async (req, res) => {
 
   const tickets = await readJson(FILES.itTickets, []);
   const ticket = {
-    id: randomUUID(), category: cat.label,
+    id: randomUUID(), pin, category: cat.label,
     subcategory: category === 'other' ? (description || '—') : (subcategory || '—'),
     location, seat: location === 'Офис 2 этаж' ? seat : '',
     description: description || '—',
     fullName: user.fullName, contact: user.contact,
-    status: 'new', createdAt: new Date().toISOString()
+    status: 'new', statusUpdatedAt: null, takenBy: null,
+    rating: null, ratingComment: null, forwardedToApi: false,
+    createdAt: new Date().toISOString()
   };
   tickets.push(ticket);
   await writeJson(FILES.itTickets, tickets);
 
-  // TODO: forward to IT API when ready
+  // Fire & forget forward to external IT API
+  if (IT_API_URL) {
+    fetch(IT_API_URL, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        id: ticket.id, category: ticket.category, subcategory: ticket.subcategory,
+        location: ticket.location, seat: ticket.seat, description: ticket.description,
+        fullName: ticket.fullName, contact: ticket.contact, createdAt: ticket.createdAt
+      })
+    }).then(async (resp) => {
+      if (resp.ok) {
+        const all = await readJson(FILES.itTickets, []);
+        const t = all.find((x) => x.id === ticket.id);
+        if (t) { t.forwardedToApi = true; await writeJson(FILES.itTickets, all); }
+      }
+    }).catch((err) => console.error('IT API forward failed:', err.message));
+  }
+
   tgNotifyItAdmins(
     `🔧 <b>ИТ-заявка</b>\n` +
     `Категория: ${cat.emoji} ${cat.label}\n` +
     (category !== 'other' && subcategory ? `Тип: ${subcategory}\n` : '') +
     `Локация: ${location}${location === 'Офис 2 этаж' && seat ? ` (место ${seat})` : ''}\n` +
     `Описание: ${ticket.description}\n` +
-    `От: ${user.fullName} (${user.contact})`
+    `От: ${user.fullName} (${user.contact})\n\n` +
+    `🔗 <a href="${publicBaseUrl}/it-status/${ticket.id}">Взять / Обновить статус</a>`
   );
 
   return res.status(201).json({ message: 'ИТ-заявка отправлена. Спасибо!', id: ticket.id });
+});
+
+/* ── IT Ticket status & rating ── */
+
+app.get('/api/it-ticket-status/:id', async (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-f-]{36}$/.test(id))
+    return res.status(400).json({ message: 'Неверный ID заявки.' });
+
+  const tickets = await readJson(FILES.itTickets, []);
+  const ticket = tickets.find((t) => t.id === id);
+  if (!ticket) return res.status(404).json({ message: 'Заявка не найдена.' });
+
+  return res.json({
+    id: ticket.id, category: ticket.category, subcategory: ticket.subcategory,
+    location: ticket.location, seat: ticket.seat, description: ticket.description,
+    fullName: ticket.fullName, contact: ticket.contact,
+    status: ticket.status, statusUpdatedAt: ticket.statusUpdatedAt,
+    takenBy: ticket.takenBy, rating: ticket.rating, ratingComment: ticket.ratingComment,
+    createdAt: ticket.createdAt
+  });
+});
+
+app.post('/api/it-ticket-status/:id', async (req, res) => {
+  const id = req.params.id;
+  if (!/^[0-9a-f-]{36}$/.test(id))
+    return res.status(400).json({ message: 'Неверный ID заявки.' });
+
+  const action = String(req.body.action || '').trim();
+  const takenBy = clip(String(req.body.takenBy || '').trim(), 100);
+
+  return withLock(FILES.itTickets, async () => {
+    const tickets = await readJson(FILES.itTickets, []);
+    const ticket = tickets.find((t) => t.id === id);
+    if (!ticket) return res.status(404).json({ message: 'Заявка не найдена.' });
+
+    if (action === 'take') {
+      if (ticket.status !== 'new')
+        return res.status(400).json({ message: 'Заявку уже взяли в работу.' });
+      ticket.status = 'in_progress';
+      ticket.takenBy = takenBy || 'Сисадмин';
+      ticket.statusUpdatedAt = new Date().toISOString();
+    } else if (action === 'done') {
+      if (ticket.status !== 'in_progress')
+        return res.status(400).json({ message: 'Заявка не в работе.' });
+      ticket.status = 'done';
+      ticket.statusUpdatedAt = new Date().toISOString();
+    } else {
+      return res.status(400).json({ message: 'Действие: take или done.' });
+    }
+
+    await writeJson(FILES.itTickets, tickets);
+    return res.json({ message: 'Статус обновлён.', status: ticket.status });
+  });
+});
+
+app.post('/api/my-it-tickets', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!/^\d{4}$/.test(pin))
+    return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
+
+  const users = await readJson(FILES.users, {});
+  if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  const tickets = await readJson(FILES.itTickets, []);
+  const my = tickets.filter((t) => t.pin === pin).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+
+  return res.json(my.map((t) => ({
+    id: t.id, category: t.category, subcategory: t.subcategory,
+    location: t.location, description: t.description,
+    status: t.status, statusUpdatedAt: t.statusUpdatedAt,
+    takenBy: t.takenBy, rating: t.rating, ratingComment: t.ratingComment,
+    createdAt: t.createdAt
+  })));
+});
+
+app.post('/api/it-ticket-rate', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const ticketId = String(req.body.ticketId || '').trim();
+  const rating = Number(req.body.rating);
+  const ratingComment = clip(String(req.body.ratingComment || '').trim(), 500);
+
+  if (!/^\d{4}$/.test(pin))
+    return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
+  if (!ticketId) return res.status(400).json({ message: 'Укажите ID заявки.' });
+  if (!Number.isInteger(rating) || rating < 1 || rating > 5)
+    return res.status(400).json({ message: 'Оценка от 1 до 5.' });
+
+  const users = await readJson(FILES.users, {});
+  if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  return withLock(FILES.itTickets, async () => {
+    const tickets = await readJson(FILES.itTickets, []);
+    const ticket = tickets.find((t) => t.id === ticketId);
+    if (!ticket) return res.status(404).json({ message: 'Заявка не найдена.' });
+    if (ticket.pin !== pin)
+      return res.status(403).json({ message: 'Можно оценить только свою заявку.' });
+    if (ticket.status !== 'done')
+      return res.status(400).json({ message: 'Оценить можно только выполненную заявку.' });
+    if (ticket.rating !== null)
+      return res.status(400).json({ message: 'Вы уже оценили эту заявку.' });
+
+    ticket.rating = rating;
+    ticket.ratingComment = ratingComment || null;
+    await writeJson(FILES.itTickets, tickets);
+    return res.json({ message: 'Спасибо за оценку!' });
+  });
 });
 
 /* ── Suggestions ── */
