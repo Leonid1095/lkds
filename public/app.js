@@ -96,6 +96,23 @@ const itTicketMessage = $('itTicketMessage');
 const myItTicketsList = $('myItTicketsList');
 const adminContent = $('adminContent');
 
+/* ── TZ DOM ── */
+const tabTz = $('tabTz');
+const tzStatsBar = $('tzStatsBar');
+const tzFilters = $('tzFilters');
+const tzListContainer = $('tzListContainer');
+const tzMessage = $('tzMessage');
+const tzPopup = $('tzPopup');
+const tzForm = $('tzForm');
+const tzPopupTitle = $('tzPopupTitle');
+const tzSubmitBtn = $('tzSubmitBtn');
+const tzCancelBtn = $('tzCancelBtn');
+const tzPopupMessage = $('tzPopupMessage');
+const tzStatusRow = $('tzStatusRow');
+const tzMeta = $('tzMeta');
+const tzHistorySection = $('tzHistorySection');
+const tzHistoryList = $('tzHistoryList');
+
 /* ── IT config (loaded from API, fallback hardcoded) ── */
 
 let IT_CATEGORIES = [
@@ -124,7 +141,11 @@ const state = {
   rooms: [],
   bookings: [],
   crmConfig: { modules: [], errorCategories: [] },
-  itTicket: { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' }
+  itTicket: { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' },
+  tzConfig: null,
+  tzFilters: { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false },
+  tzList: [],
+  tzEditId: null
 };
 
 /* ── Helpers ── */
@@ -169,7 +190,9 @@ document.querySelectorAll('.tab').forEach((tab) => {
     document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
     document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
     tab.classList.add('active');
-    $('panel' + tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1)).classList.add('active');
+    const panelName = tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1);
+    $('panel' + panelName).classList.add('active');
+    if (tab.dataset.tab === 'tz') loadTzData();
   });
 });
 
@@ -210,6 +233,7 @@ function showMain() {
   } else {
     hide(adminBtn);
   }
+  tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
 }
 
 function showAuth() {
@@ -328,11 +352,19 @@ async function loadApp() {
     if (itConfig.locations) IT_LOCATIONS = itConfig.locations;
   } catch { /* fallback: сервер ещё без /api/it-config */ }
 
+  try {
+    state.tzConfig = await api('/api/tz-config');
+  } catch { /* no tz-config */ }
+
   renderRooms();
   renderLinks(links);
   renderCrmConfig();
   resetItWizard();
   loadMyItTickets();
+
+  if (state.adminRole === 'superadmin' && state.tzConfig) {
+    renderTzFilters();
+  }
 
   dateInput.value = getToday();
   await loadBookings();
@@ -1380,6 +1412,308 @@ async function rateItTicket(ticketId, rating) {
     msg(itTicketMessage, err.message, 'error');
   }
 }
+
+/* ── TZ (Технические задания) ── */
+
+const TZ_PRIO_LABELS = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
+
+function tzStatusBadge(status) {
+  const cfg = state.tzConfig;
+  const label = cfg?.statusLabels?.[status] || status;
+  const cls = `tz-st-${status}`;
+  return `<span class="tz-status-badge ${cls}">${esc(label)}</span>`;
+}
+
+function tzPrioBadge(priority) {
+  const label = TZ_PRIO_LABELS[priority] || priority;
+  return `<span class="tz-prio-badge tz-prio-${priority}">${esc(label)}</span>`;
+}
+
+function renderTzFilters() {
+  if (!tzFilters || !state.tzConfig) return;
+  const cfg = state.tzConfig;
+  const f = state.tzFilters;
+
+  const systemOpts = ['<option value="">Все системы</option>']
+    .concat(cfg.systems.map((s) => `<option value="${esc(s)}"${f.system === s ? ' selected' : ''}>${esc(s)}</option>`)).join('');
+  const statusOpts = ['<option value="">Все статусы</option>']
+    .concat(cfg.statuses.map((s) => `<option value="${esc(s)}"${f.status === s ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`)).join('');
+  const typeOpts = ['<option value="">Все типы</option>']
+    .concat(cfg.types.map((t) => `<option value="${esc(t)}"${f.type === t ? ' selected' : ''}>${esc(t)}</option>`)).join('');
+  const prioOpts = ['<option value="">Все приоритеты</option>']
+    .concat(cfg.priorities.map((p) => `<option value="${esc(p)}"${f.priority === p ? ' selected' : ''}>${esc(TZ_PRIO_LABELS[p] || p)}</option>`)).join('');
+
+  tzFilters.innerHTML = `
+    <div class="tz-filters-row">
+      <select class="tz-filter-select" id="tzFilterSystem">${systemOpts}</select>
+      <select class="tz-filter-select" id="tzFilterStatus">${statusOpts}</select>
+      <select class="tz-filter-select" id="tzFilterType">${typeOpts}</select>
+      <select class="tz-filter-select" id="tzFilterPriority">${prioOpts}</select>
+      <input class="tz-filter-search" id="tzFilterSearch" placeholder="Поиск..." value="${esc(f.search)}" />
+      <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать ТЗ</button>
+    </div>
+    <div class="tz-filters-row">
+      <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterOverdue"${f.overdue ? ' checked' : ''} /> Просрочено</label>
+      <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterDeadlineSoon"${f.deadline_soon ? ' checked' : ''} /> Скоро дедлайн</label>
+      <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterNoDates"${f.no_dates ? ' checked' : ''} /> Без дат</label>
+      <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterNoOwner"${f.no_owner ? ' checked' : ''} /> Без ответственного</label>
+    </div>`;
+
+  // Bind filter events
+  const bindChange = (id, key) => {
+    const el = document.getElementById(id);
+    if (el) el.addEventListener('change', () => { state.tzFilters[key] = el.type === 'checkbox' ? el.checked : el.value; loadTzData(); });
+  };
+  bindChange('tzFilterSystem', 'system');
+  bindChange('tzFilterStatus', 'status');
+  bindChange('tzFilterType', 'type');
+  bindChange('tzFilterPriority', 'priority');
+  bindChange('tzFilterOverdue', 'overdue');
+  bindChange('tzFilterDeadlineSoon', 'deadline_soon');
+  bindChange('tzFilterNoDates', 'no_dates');
+  bindChange('tzFilterNoOwner', 'no_owner');
+
+  const searchEl = document.getElementById('tzFilterSearch');
+  if (searchEl) {
+    let searchTimer;
+    searchEl.addEventListener('input', () => {
+      clearTimeout(searchTimer);
+      searchTimer = setTimeout(() => { state.tzFilters.search = searchEl.value; loadTzData(); }, 300);
+    });
+  }
+
+  const createBtn = document.getElementById('tzCreateBtn');
+  if (createBtn) createBtn.addEventListener('click', openTzCreateForm);
+}
+
+function renderTzStats(stats) {
+  if (!tzStatsBar) return;
+  tzStatsBar.innerHTML = `
+    <div class="tz-stats-row">
+      <div class="tz-stat-card"><div class="tz-stat-num">${stats.total}</div><div class="tz-stat-label">Всего</div></div>
+      <div class="tz-stat-card tz-stat-danger"><div class="tz-stat-num">${stats.overdue}</div><div class="tz-stat-label">Просрочено</div></div>
+      <div class="tz-stat-card tz-stat-warn"><div class="tz-stat-num">${stats.deadline_soon}</div><div class="tz-stat-label">Скоро</div></div>
+      <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_dates}</div><div class="tz-stat-label">Без дат</div></div>
+      <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_owner}</div><div class="tz-stat-label">Без ответств.</div></div>
+    </div>`;
+}
+
+function renderTzList(items) {
+  if (!tzListContainer) return;
+  if (!items.length) {
+    tzListContainer.innerHTML = '<p class="tz-empty">Нет ТЗ по выбранным фильтрам</p>';
+    return;
+  }
+
+  const cfg = state.tzConfig;
+  let html = '<table class="tz-table"><tr><th>Код</th><th>Название</th><th>Система</th><th>Тип</th><th>Приоритет</th><th>Статус</th><th>Ответственный</th><th>Ссылки</th></tr>';
+  for (const tz of items) {
+    const f = tz.flags || {};
+    let rowCls = '';
+    if (f.overdue) rowCls = ' class="tz-row-overdue"';
+    else if (f.deadline_soon) rowCls = ' class="tz-row-soon"';
+
+    const links = [];
+    if (tz.link_confluence) links.push(`<a href="${esc(tz.link_confluence)}" target="_blank" rel="noreferrer" class="tz-link-icon" title="Confluence" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></a>`);
+    if (tz.link_jira) links.push(`<a href="${esc(tz.link_jira)}" target="_blank" rel="noreferrer" class="tz-link-icon" title="Jira" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></a>`);
+
+    html += `<tr${rowCls} data-tz-id="${esc(tz.id)}">
+      <td class="tz-code-cell">${esc(tz.tz_code)}</td>
+      <td class="tz-title-cell">${esc(tz.title)}</td>
+      <td>${esc(tz.system)}</td>
+      <td>${esc(tz.type)}</td>
+      <td>${tzPrioBadge(tz.priority)}</td>
+      <td>${tzStatusBadge(tz.status)}</td>
+      <td>${tz.owner ? esc(tz.owner) : '<span style="color:var(--disabled)">—</span>'}</td>
+      <td>${links.join(' ') || '—'}</td>
+    </tr>`;
+  }
+  html += '</table>';
+  tzListContainer.innerHTML = html;
+
+  // Bind row click to open detail
+  tzListContainer.querySelectorAll('[data-tz-id]').forEach((row) => {
+    row.addEventListener('click', () => openTzDetail(row.dataset.tzId));
+  });
+}
+
+async function loadTzData() {
+  if (!state.pin || state.adminRole !== 'superadmin') return;
+  msg(tzMessage, '');
+  try {
+    const [items, stats] = await Promise.all([
+      api('/api/admin/tz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin, ...state.tzFilters })
+      }),
+      api('/api/admin/tz-stats', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin })
+      })
+    ]);
+    state.tzList = items;
+    renderTzStats(stats);
+    renderTzList(items);
+  } catch (err) {
+    msg(tzMessage, err.message, 'error');
+  }
+}
+
+function openTzCreateForm() {
+  state.tzEditId = null;
+  const cfg = state.tzConfig;
+  tzPopupTitle.querySelector('span').textContent = 'Новое ТЗ';
+  tzSubmitBtn.textContent = 'Создать';
+  tzForm.reset();
+  hide(tzStatusRow);
+  hide(tzMeta);
+  hide(tzHistorySection);
+  msg(tzPopupMessage, '');
+
+  // Populate selects
+  $('tzSystem').innerHTML = cfg.systems.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
+  $('tzType').innerHTML = cfg.types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+  $('tzPriority').innerHTML = cfg.priorities.map((p) => `<option value="${esc(p)}">${esc(TZ_PRIO_LABELS[p] || p)}</option>`).join('');
+
+  show(tzPopup);
+}
+
+async function openTzDetail(id) {
+  msg(tzPopupMessage, '');
+  try {
+    const data = await api(`/api/tz/${id}?pin=${encodeURIComponent(state.pin)}`);
+    state.tzEditId = id;
+    const cfg = state.tzConfig;
+
+    tzPopupTitle.querySelector('span').textContent = `${data.tz_code} — Редактирование`;
+    tzSubmitBtn.textContent = 'Сохранить';
+
+    // Populate selects
+    $('tzSystem').innerHTML = cfg.systems.map((s) => `<option value="${esc(s)}"${s === data.system ? ' selected' : ''}>${esc(s)}</option>`).join('');
+    $('tzType').innerHTML = cfg.types.map((t) => `<option value="${esc(t)}"${t === data.type ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    $('tzPriority').innerHTML = cfg.priorities.map((p) => `<option value="${esc(p)}"${p === data.priority ? ' selected' : ''}>${esc(TZ_PRIO_LABELS[p] || p)}</option>`).join('');
+
+    // Fill form
+    $('tzTitle').value = data.title || '';
+    $('tzOwner').value = data.owner || '';
+    $('tzDescription').value = data.description || '';
+    $('tzLinkConfluence').value = data.link_confluence || '';
+    $('tzLinkJira').value = data.link_jira || '';
+    $('tzDateAnalysis').value = data.date_analysis_deadline || '';
+    $('tzDateDev').value = data.date_dev_deadline || '';
+    $('tzDateRelease').value = data.date_release_deadline || '';
+
+    // Status select — show only allowed transitions + current
+    const transitions = cfg.transitions[data.status] || [];
+    const statusOptions = [data.status, ...transitions];
+    $('tzStatus').innerHTML = statusOptions.map((s) =>
+      `<option value="${esc(s)}"${s === data.status ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
+    ).join('');
+    show(tzStatusRow);
+
+    // Meta info
+    tzMeta.innerHTML = `
+      <span>Создано: ${fmtDate(data.created_at)}</span>
+      <span>Автор: ${esc(data.created_by || '—')}</span>
+      <span>Обновлено: ${fmtDate(data.updated_at)}</span>`;
+    show(tzMeta);
+
+    // History
+    if (data.history && data.history.length) {
+      renderTzHistory(data.history);
+      show(tzHistorySection);
+    } else {
+      hide(tzHistorySection);
+    }
+
+    show(tzPopup);
+  } catch (err) {
+    msg(tzMessage, err.message, 'error');
+  }
+}
+
+function renderTzHistory(history) {
+  if (!tzHistoryList) return;
+  const cfg = state.tzConfig;
+  const fieldLabels = {
+    title: 'Название', system: 'Система', type: 'Тип', priority: 'Приоритет',
+    status: 'Статус', description: 'Описание', owner: 'Ответственный',
+    link_confluence: 'Confluence', link_jira: 'Jira',
+    date_analysis_deadline: 'Дедлайн анализа', date_dev_deadline: 'Дедлайн разработки',
+    date_release_deadline: 'Дедлайн релиза'
+  };
+
+  tzHistoryList.innerHTML = history.map((h) => {
+    const field = fieldLabels[h.field] || h.field;
+    let oldV = h.old_value ?? '—';
+    let newV = h.new_value ?? '—';
+    if (h.field === 'status') {
+      oldV = cfg?.statusLabels?.[oldV] || oldV;
+      newV = cfg?.statusLabels?.[newV] || newV;
+    }
+    if (h.field === 'description') {
+      oldV = oldV.length > 40 ? oldV.slice(0, 40) + '...' : oldV;
+      newV = newV.length > 40 ? newV.slice(0, 40) + '...' : newV;
+    }
+    return `<div class="tz-history-item">
+      <span class="tz-history-date">${fmtDate(h.changed_at)}</span>
+      <span class="tz-history-field">${esc(field)}</span>: ${esc(String(oldV))} → ${esc(String(newV))}
+      <br><small>${esc(h.changed_by)}</small>
+    </div>`;
+  }).join('');
+}
+
+// TZ form submit
+tzForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  msg(tzPopupMessage, '');
+  tzSubmitBtn.disabled = true;
+
+  const body = {
+    pin: state.pin,
+    title: $('tzTitle').value.trim(),
+    system: $('tzSystem').value,
+    type: $('tzType').value,
+    priority: $('tzPriority').value,
+    description: $('tzDescription').value.trim(),
+    owner: $('tzOwner').value.trim(),
+    link_confluence: $('tzLinkConfluence').value.trim(),
+    link_jira: $('tzLinkJira').value.trim(),
+    date_analysis_deadline: $('tzDateAnalysis').value || '',
+    date_dev_deadline: $('tzDateDev').value || '',
+    date_release_deadline: $('tzDateRelease').value || ''
+  };
+
+  try {
+    if (state.tzEditId) {
+      body.status = $('tzStatus').value;
+      const result = await api(`/api/tz/${state.tzEditId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      msg(tzPopupMessage, result.message, 'success');
+    } else {
+      const result = await api('/api/tz', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      msg(tzPopupMessage, result.message, 'success');
+    }
+    setTimeout(() => { hide(tzPopup); loadTzData(); }, 800);
+  } catch (err) {
+    msg(tzPopupMessage, err.message, 'error');
+  } finally {
+    tzSubmitBtn.disabled = false;
+  }
+});
+
+// TZ popup close
+tzCancelBtn.addEventListener('click', () => hide(tzPopup));
+tzPopup.addEventListener('click', (e) => { if (e.target === tzPopup) hide(tzPopup); });
 
 /* ── IT Status page (standalone, for sysadmin) ── */
 

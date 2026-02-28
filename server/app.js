@@ -38,7 +38,9 @@ const FILES = {
   tickets: path.join(dataDir, 'tickets.json'),
   itTickets: path.join(dataDir, 'it-tickets.json'),
   suggestions: path.join(dataDir, 'suggestions.json'),
-  pinRequests: path.join(dataDir, 'pin-requests.json')
+  pinRequests: path.join(dataDir, 'pin-requests.json'),
+  tz: path.join(dataDir, 'tz.json'),
+  tzHistory: path.join(dataDir, 'tz-history.json')
 };
 
 /* ── Security middleware ── */
@@ -344,6 +346,91 @@ function hasOverlap(a, b) {
 }
 
 function clip(str, max) { return str.length > max ? str.slice(0, max) : str; }
+
+/* ── TZ constants ── */
+
+const TZ_SYSTEMS = ['ALIS', 'TOS', 'WMS', '1C_CRM', 'OTHER'];
+const TZ_TYPES = ['ТЗ', 'Дефект', 'Заявка'];
+const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
+const TZ_PRIORITIES = ['low', 'medium', 'high', 'critical'];
+
+const TZ_STATUS_LABELS = {
+  draft: 'Черновик',
+  review: 'На рассмотрении',
+  analysis: 'Анализ',
+  development: 'Разработка',
+  testing: 'Тестирование',
+  release: 'Релиз',
+  production: 'В продакшене',
+  cancelled: 'Отменено'
+};
+
+const TZ_TRANSITIONS = {
+  draft: ['review', 'cancelled'],
+  review: ['analysis', 'cancelled'],
+  analysis: ['development', 'cancelled'],
+  development: ['testing', 'cancelled'],
+  testing: ['release', 'development', 'cancelled'],
+  release: ['production', 'cancelled'],
+  production: [],
+  cancelled: ['draft']
+};
+
+function computeTzFlags(tz) {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const flags = {};
+
+  // Просрочка анализа
+  flags.analysis_overdue = tz.status === 'analysis' && tz.date_analysis_deadline && today > tz.date_analysis_deadline;
+  // Просрочка разработки
+  flags.dev_overdue = tz.status === 'development' && tz.date_dev_deadline && today > tz.date_dev_deadline;
+  // Просрочка релиза
+  flags.release_overdue = tz.status === 'release' && tz.date_release_deadline && today > tz.date_release_deadline;
+  // Общая просрочка (любой deadline пройден и статус не финальный)
+  flags.overdue = flags.analysis_overdue || flags.dev_overdue || flags.release_overdue;
+
+  // Скоро дедлайн (в пределах 7 дней)
+  const soon7 = new Date(now.getTime() + 7 * 86400000).toISOString().slice(0, 10);
+  const activeDeadline =
+    (tz.status === 'analysis' && tz.date_analysis_deadline) ||
+    (tz.status === 'development' && tz.date_dev_deadline) ||
+    (tz.status === 'release' && tz.date_release_deadline) ||
+    null;
+  flags.deadline_soon = !flags.overdue && !!activeDeadline && activeDeadline <= soon7 && activeDeadline >= today;
+
+  // Нет дат вообще
+  flags.no_dates = !tz.date_analysis_deadline && !tz.date_dev_deadline && !tz.date_release_deadline;
+  // Нет ответственного
+  flags.no_owner = !tz.owner || tz.owner.trim() === '';
+
+  return flags;
+}
+
+function generateTzCode(allTz, system) {
+  const prefix = `TZ-${system}-`;
+  const existing = allTz.filter((t) => t.tz_code && t.tz_code.startsWith(prefix));
+  let maxNum = 0;
+  for (const t of existing) {
+    const num = parseInt(t.tz_code.slice(prefix.length), 10);
+    if (!isNaN(num) && num > maxNum) maxNum = num;
+  }
+  return `${prefix}${String(maxNum + 1).padStart(4, '0')}`;
+}
+
+async function recordTzHistory(tzId, field, oldValue, newValue, changedBy) {
+  const history = await readJson(FILES.tzHistory, []);
+  history.push({
+    id: randomUUID(),
+    tz_id: tzId,
+    field,
+    old_value: oldValue ?? null,
+    new_value: newValue ?? null,
+    changed_by: changedBy,
+    changed_at: new Date().toISOString()
+  });
+  await writeJson(FILES.tzHistory, history);
+}
 
 async function getUserRole(pin, user) {
   if (ADMIN_PINS.has(pin)) return 'superadmin';
@@ -1100,6 +1187,226 @@ app.patch('/api/bookings/:id', async (req, res) => {
     await writeJson(FILES.bookings, bookings);
     return res.json({ message: 'Слот отменён.' });
   });
+});
+
+/* ── TZ (Технические задания) ── */
+
+app.get('/api/tz-config', (_req, res) => {
+  res.json({
+    systems: TZ_SYSTEMS,
+    types: TZ_TYPES,
+    statuses: TZ_STATUSES,
+    priorities: TZ_PRIORITIES,
+    statusLabels: TZ_STATUS_LABELS,
+    transitions: TZ_TRANSITIONS
+  });
+});
+
+app.post('/api/tz', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const title = clip(String(req.body.title || '').trim(), 300);
+  const system = String(req.body.system || '').trim();
+  const type = String(req.body.type || '').trim();
+  const priority = String(req.body.priority || '').trim();
+  const description = clip(String(req.body.description || '').trim(), 5000);
+  const owner = clip(String(req.body.owner || '').trim(), 100);
+  const link_confluence = clip(String(req.body.link_confluence || '').trim(), 500);
+  const link_jira = clip(String(req.body.link_jira || '').trim(), 500);
+  const date_analysis_deadline = String(req.body.date_analysis_deadline || '').trim();
+  const date_dev_deadline = String(req.body.date_dev_deadline || '').trim();
+  const date_release_deadline = String(req.body.date_release_deadline || '').trim();
+
+  if (!title || title.length < 3) return res.status(400).json({ message: 'Название ТЗ минимум 3 символа.' });
+  if (!TZ_SYSTEMS.includes(system)) return res.status(400).json({ message: 'Выберите систему.' });
+  if (!TZ_TYPES.includes(type)) return res.status(400).json({ message: 'Выберите тип.' });
+  if (!TZ_PRIORITIES.includes(priority)) return res.status(400).json({ message: 'Выберите приоритет.' });
+  if (date_analysis_deadline && !isValidDate(date_analysis_deadline)) return res.status(400).json({ message: 'Дата анализа: YYYY-MM-DD.' });
+  if (date_dev_deadline && !isValidDate(date_dev_deadline)) return res.status(400).json({ message: 'Дата разработки: YYYY-MM-DD.' });
+  if (date_release_deadline && !isValidDate(date_release_deadline)) return res.status(400).json({ message: 'Дата релиза: YYYY-MM-DD.' });
+
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    const tzCode = generateTzCode(allTz, system);
+    const users = await readJson(FILES.users, {});
+    const creatorName = users[pin]?.fullName || pin;
+
+    const tz = {
+      id: randomUUID(),
+      tz_code: tzCode,
+      title,
+      system,
+      type,
+      priority,
+      status: 'draft',
+      description,
+      owner,
+      link_confluence,
+      link_jira,
+      date_analysis_deadline: date_analysis_deadline || null,
+      date_dev_deadline: date_dev_deadline || null,
+      date_release_deadline: date_release_deadline || null,
+      created_by: creatorName,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+
+    allTz.push(tz);
+    await writeJson(FILES.tz, allTz);
+
+    return res.status(201).json({ message: `ТЗ ${tzCode} создано.`, tz });
+  });
+});
+
+app.put('/api/tz/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    const tz = allTz.find((t) => t.id === id);
+    if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+    const users = await readJson(FILES.users, {});
+    const changedBy = users[pin]?.fullName || pin;
+
+    const editableFields = [
+      'title', 'system', 'type', 'priority', 'status',
+      'description', 'owner', 'link_confluence', 'link_jira',
+      'date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline'
+    ];
+
+    // Status transition check
+    if (req.body.status !== undefined && req.body.status !== tz.status) {
+      const newStatus = String(req.body.status).trim();
+      if (!TZ_STATUSES.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
+      const allowed = TZ_TRANSITIONS[tz.status] || [];
+      if (!allowed.includes(newStatus)) {
+        return res.status(400).json({ message: `Переход из «${TZ_STATUS_LABELS[tz.status]}» в «${TZ_STATUS_LABELS[newStatus]}» не допускается.` });
+      }
+    }
+
+    // Validation
+    if (req.body.title !== undefined) {
+      const t = clip(String(req.body.title).trim(), 300);
+      if (t.length < 3) return res.status(400).json({ message: 'Название ТЗ минимум 3 символа.' });
+    }
+    if (req.body.system !== undefined && !TZ_SYSTEMS.includes(req.body.system))
+      return res.status(400).json({ message: 'Выберите систему.' });
+    if (req.body.type !== undefined && !TZ_TYPES.includes(req.body.type))
+      return res.status(400).json({ message: 'Выберите тип.' });
+    if (req.body.priority !== undefined && !TZ_PRIORITIES.includes(req.body.priority))
+      return res.status(400).json({ message: 'Выберите приоритет.' });
+
+    for (const field of editableFields) {
+      if (req.body[field] === undefined) continue;
+      let newVal = typeof req.body[field] === 'string' ? req.body[field].trim() : req.body[field];
+      if (field === 'title') newVal = clip(newVal, 300);
+      if (field === 'description') newVal = clip(newVal, 5000);
+      if (field === 'owner') newVal = clip(newVal, 100);
+      if (field === 'link_confluence') newVal = clip(newVal, 500);
+      if (field === 'link_jira') newVal = clip(newVal, 500);
+      if (['date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline'].includes(field)) {
+        if (newVal && !isValidDate(newVal)) continue;
+        newVal = newVal || null;
+      }
+
+      const oldVal = tz[field] ?? null;
+      if (String(oldVal ?? '') !== String(newVal ?? '')) {
+        await recordTzHistory(tz.id, field, oldVal, newVal, changedBy);
+        tz[field] = newVal;
+      }
+    }
+
+    tz.updated_at = new Date().toISOString();
+    await writeJson(FILES.tz, allTz);
+
+    return res.json({ message: 'ТЗ обновлено.', tz });
+  });
+});
+
+app.post('/api/admin/tz', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const allTz = await readJson(FILES.tz, []);
+
+  // Filters
+  const fSystem = String(req.body.system || '').trim();
+  const fStatus = String(req.body.status || '').trim();
+  const fType = String(req.body.type || '').trim();
+  const fPriority = String(req.body.priority || '').trim();
+  const fSearch = String(req.body.search || '').trim().toLowerCase();
+  const fOverdue = !!req.body.overdue;
+  const fNoDates = !!req.body.no_dates;
+  const fNoOwner = !!req.body.no_owner;
+  const fDeadlineSoon = !!req.body.deadline_soon;
+
+  let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+
+  if (fSystem) items = items.filter((t) => t.system === fSystem);
+  if (fStatus) items = items.filter((t) => t.status === fStatus);
+  if (fType) items = items.filter((t) => t.type === fType);
+  if (fPriority) items = items.filter((t) => t.priority === fPriority);
+  if (fSearch) items = items.filter((t) =>
+    (t.title && t.title.toLowerCase().includes(fSearch)) ||
+    (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
+    (t.owner && t.owner.toLowerCase().includes(fSearch)) ||
+    (t.description && t.description.toLowerCase().includes(fSearch))
+  );
+  if (fOverdue) items = items.filter((t) => t.flags.overdue);
+  if (fNoDates) items = items.filter((t) => t.flags.no_dates);
+  if (fNoOwner) items = items.filter((t) => t.flags.no_owner);
+  if (fDeadlineSoon) items = items.filter((t) => t.flags.deadline_soon);
+
+  items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+  return res.json(items);
+});
+
+app.get('/api/tz/:id', async (req, res) => {
+  const reqPin = String(req.query.pin || '').trim();
+  if (!(await isSuperAdmin(reqPin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  const allTz = await readJson(FILES.tz, []);
+  const tz = allTz.find((t) => t.id === id);
+  if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+  const history = (await readJson(FILES.tzHistory, []))
+    .filter((h) => h.tz_id === id)
+    .sort((a, b) => b.changed_at.localeCompare(a.changed_at));
+
+  return res.json({ ...tz, flags: computeTzFlags(tz), history });
+});
+
+app.post('/api/admin/tz-stats', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const allTz = await readJson(FILES.tz, []);
+  const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+
+  const stats = {
+    total: allTz.length,
+    overdue: withFlags.filter((t) => t.flags.overdue).length,
+    deadline_soon: withFlags.filter((t) => t.flags.deadline_soon).length,
+    no_dates: withFlags.filter((t) => t.flags.no_dates).length,
+    no_owner: withFlags.filter((t) => t.flags.no_owner).length,
+    by_status: {},
+    by_system: {}
+  };
+
+  for (const s of TZ_STATUSES) stats.by_status[s] = 0;
+  for (const s of TZ_SYSTEMS) stats.by_system[s] = 0;
+  for (const tz of allTz) {
+    if (stats.by_status[tz.status] !== undefined) stats.by_status[tz.status]++;
+    if (stats.by_system[tz.system] !== undefined) stats.by_system[tz.system]++;
+  }
+
+  return res.json(stats);
 });
 
 /* ── SPA fallback ── */

@@ -697,6 +697,13 @@ button{
   .popup-card{padding:22px;border-radius:16px}
   .admin-table{font-size:12px}
   .admin-table th,.admin-table td{padding:6px 8px}
+  .tz-form-grid{grid-template-columns:1fr}
+  .tz-form-dates{grid-template-columns:1fr}
+  .tz-stats-row{gap:8px}
+  .tz-stat-card{min-width:80px;padding:10px}
+  .tz-table{font-size:12px}
+  .tz-table th,.tz-table td{padding:6px 8px}
+  .tz-popup-card{max-width:100%}
 }
 
 /* ── Responsive: Mobile ── */
@@ -788,6 +795,18 @@ button{
   .message{font-size:12px}
   .hint{font-size:11px}
 
+  .tz-form-grid{grid-template-columns:1fr}
+  .tz-form-dates{grid-template-columns:1fr}
+  .tz-filters-row{flex-direction:column}
+  .tz-filter-select,.tz-filter-search{width:100%;min-width:0}
+  .tz-stats-row{gap:6px}
+  .tz-stat-card{min-width:60px;padding:8px 6px}
+  .tz-stat-card .tz-stat-num{font-size:18px}
+  .tz-stat-card .tz-stat-label{font-size:9px}
+  .tz-table{font-size:11px}
+  .tz-table th,.tz-table td{padding:5px 6px}
+  .tz-popup-card{border-radius:16px 16px 0 0;max-width:100%}
+
   input,select,textarea{font-size:16px;padding:10px 12px}
 
   /* Safe area for iPhone notch */
@@ -803,6 +822,133 @@ button{
     padding-bottom:max(20px, env(safe-area-inset-bottom));
   }
 }
+
+/* ── TZ (Технические задания) ── */
+
+.tz-stats-row{
+  display:flex;gap:10px;flex-wrap:wrap;margin-bottom:16px;
+}
+.tz-stat-card{
+  flex:1;min-width:100px;padding:12px 14px;border-radius:12px;
+  background:var(--bg);border:1.5px solid var(--border);text-align:center;
+  cursor:pointer;transition:all .2s;
+}
+.tz-stat-card:hover{border-color:var(--accent);background:var(--accent-soft)}
+.tz-stat-card .tz-stat-num{font-size:22px;font-weight:800;color:var(--text)}
+.tz-stat-card .tz-stat-label{font-size:11px;color:var(--text-sec);font-weight:600;text-transform:uppercase;letter-spacing:.3px}
+.tz-stat-danger .tz-stat-num{color:var(--danger)}
+.tz-stat-danger{border-color:#fed7d7;background:var(--danger-soft)}
+.tz-stat-warn .tz-stat-num{color:#d69e2e}
+.tz-stat-warn{border-color:#fefcbf;background:#fffff0}
+
+.tz-filters{
+  display:flex;flex-direction:column;gap:10px;margin-bottom:16px;
+}
+.tz-filters-row{
+  display:flex;gap:8px;flex-wrap:wrap;align-items:center;
+}
+.tz-filter-select{
+  border-radius:8px;border:1.5px solid var(--border);
+  padding:7px 10px;font:inherit;font-size:13px;color:var(--text);
+  background:#fff;min-width:120px;transition:border-color .2s;
+}
+.tz-filter-select:focus{outline:none;border-color:var(--accent)}
+.tz-filter-search{
+  border-radius:8px;border:1.5px solid var(--border);
+  padding:7px 10px;font:inherit;font-size:13px;color:var(--text);
+  background:#fff;flex:1;min-width:160px;transition:border-color .2s;
+}
+.tz-filter-search:focus{outline:none;border-color:var(--accent)}
+.tz-checkbox-label{
+  display:flex;align-items:center;gap:4px;
+  font-size:12px;font-weight:600;color:var(--text-sec);
+  cursor:pointer;white-space:nowrap;
+}
+.tz-checkbox-label input[type="checkbox"]{
+  width:16px;height:16px;accent-color:var(--accent);cursor:pointer;
+}
+.tz-create-btn{
+  background:var(--accent);color:#fff;border:none;
+  padding:8px 16px;border-radius:8px;font-weight:700;font-size:13px;
+  cursor:pointer;transition:all .2s;white-space:nowrap;
+}
+.tz-create-btn:hover{background:var(--primary-hover);transform:translateY(-1px)}
+
+/* TZ table */
+.tz-table{
+  width:100%;border-collapse:collapse;font-size:13px;
+}
+.tz-table th{
+  text-align:left;padding:8px 10px;border-bottom:2px solid var(--border);
+  color:var(--text-sec);font-weight:700;white-space:nowrap;font-size:12px;
+}
+.tz-table td{
+  padding:8px 10px;border-bottom:1px solid var(--border);
+  vertical-align:top;
+}
+.tz-table tr{cursor:pointer;transition:background .15s}
+.tz-table tr:hover td{background:var(--accent-soft)}
+.tz-row-overdue td{background:#fff5f5!important}
+.tz-row-overdue:hover td{background:#fed7d7!important}
+.tz-row-soon td{background:#fffff0!important}
+.tz-row-soon:hover td{background:#fefcbf!important}
+.tz-code-cell{font-weight:700;white-space:nowrap;color:var(--accent)}
+.tz-cell-overdue{color:var(--danger);font-weight:700}
+.tz-title-cell{max-width:250px;word-wrap:break-word}
+.tz-link-icon{
+  display:inline-block;margin-left:4px;vertical-align:middle;
+  color:var(--accent);opacity:.7;transition:opacity .2s;
+}
+.tz-link-icon:hover{opacity:1}
+
+/* TZ status badges */
+.tz-status-badge{
+  display:inline-block;font-size:11px;font-weight:700;
+  padding:3px 10px;border-radius:8px;white-space:nowrap;
+}
+.tz-st-draft{background:#edf2f7;color:#718096}
+.tz-st-review{background:#fefcbf;color:#975a16}
+.tz-st-analysis{background:#bee3f8;color:#2b6cb0}
+.tz-st-development{background:var(--accent-soft);color:var(--accent)}
+.tz-st-testing{background:#e9d8fd;color:#6b46c1}
+.tz-st-release{background:#feebc8;color:#c05621}
+.tz-st-production{background:var(--ok-soft);color:var(--ok)}
+.tz-st-cancelled{background:var(--danger-soft);color:var(--danger)}
+
+/* TZ priority badges */
+.tz-prio-badge{
+  display:inline-block;font-size:10px;font-weight:700;
+  padding:2px 8px;border-radius:6px;white-space:nowrap;text-transform:uppercase;
+}
+.tz-prio-low{background:#edf2f7;color:#718096}
+.tz-prio-medium{background:#fefcbf;color:#975a16}
+.tz-prio-high{background:#feebc8;color:#c05621}
+.tz-prio-critical{background:var(--danger-soft);color:var(--danger)}
+
+/* TZ popup form */
+.tz-popup-card{max-width:600px;max-height:90vh;overflow-y:auto}
+.tz-form-grid{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.tz-form-dates{display:grid;grid-template-columns:1fr 1fr 1fr;gap:12px}
+.tz-meta{
+  font-size:12px;color:var(--text-sec);padding:10px 12px;
+  background:var(--bg);border-radius:8px;margin-top:4px;
+  display:flex;gap:16px;flex-wrap:wrap;
+}
+.tz-meta span{white-space:nowrap}
+
+/* TZ history */
+.tz-history-section{margin-top:12px}
+.tz-history-section h4{margin:0 0 8px;font-size:14px;color:var(--text)}
+.tz-history-list{max-height:200px;overflow-y:auto}
+.tz-history-item{
+  padding:6px 10px;border-bottom:1px solid var(--border);
+  font-size:12px;color:var(--text-sec);
+}
+.tz-history-item:last-child{border-bottom:none}
+.tz-history-field{font-weight:700;color:var(--text)}
+.tz-history-date{float:right;font-size:11px;opacity:.7}
+
+.tz-empty{text-align:center;color:var(--disabled);padding:32px 0;font-size:14px}
 
 /* ── Touch-friendly: min tap target 44px ── */
 @media(pointer:coarse){
