@@ -408,12 +408,13 @@ function computeTzFlags(tz) {
   // Нет ответственного
   flags.no_owner = !tz.owner || tz.owner.trim() === '';
 
-  // Неполные дедлайны: есть хотя бы один, но для текущей/будущих фаз не все заданы
-  const hasAny = !!tz.date_analysis_deadline || !!tz.date_dev_deadline || !!tz.date_release_deadline;
-  const needAnalysis = ord < 3 && !tz.date_analysis_deadline;
-  const needDev = ord < 4 && !tz.date_dev_deadline;
-  const needRelease = ord < 6 && !tz.date_release_deadline;
-  flags.missing_deadline = hasAny && (needAnalysis || needDev || needRelease);
+  // Неполные дедлайны: ТЗ продвинулось, а дедлайн текущей фазы не задан
+  // (при условии что предыдущая фаза имела дедлайн — т.е. дедлайны ведутся)
+  // В разработке (ord=3): анализ прошёл, дедлайн анализа был → а дедлайн разработки не задали
+  // В тестировании/релизе (ord 4-5): были ранние дедлайны → а дедлайн релиза не задали
+  flags.missing_deadline =
+    (ord === 3 && !!tz.date_analysis_deadline && !tz.date_dev_deadline) ||
+    (ord >= 4 && ord <= 5 && (!!tz.date_analysis_deadline || !!tz.date_dev_deadline) && !tz.date_release_deadline);
 
   return flags;
 }
