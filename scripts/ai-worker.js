@@ -2,14 +2,112 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { computeTzFlags, TZ_STATUS_LABELS } from '../server/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const TASKS_FILE = path.join(rootDir, 'data', 'ai-tasks.json');
+const TZ_FILE = path.join(rootDir, 'data', 'tz.json');
 const CLAUDE_BIN = '/home/plg/.nvm/versions/node/v20.19.4/bin/claude';
 const POLL_INTERVAL = 5000;
 const TASK_TIMEOUT = 300000;
+
+/* ── Telegram helpers ── */
+
+async function sendTelegram(chatId, text) {
+  const token = process.env.TG_BOT_TOKEN;
+  if (!token || !chatId) return;
+  try {
+    await fetch(`https://api.telegram.org/bot${token}/sendMessage`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ chat_id: chatId, text, parse_mode: 'HTML' })
+    });
+  } catch (err) {
+    log(`[tg] send failed: ${err.message}`);
+  }
+}
+
+/* ── Morning TZ digest ── */
+
+let lastDigestDate = null;
+
+function shouldRunDigest() {
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const hours = now.getHours();
+  return hours >= 9 && lastDigestDate !== today;
+}
+
+async function sendTzDigest() {
+  const today = new Date().toISOString().slice(0, 10);
+  lastDigestDate = today;
+
+  const adminIds = (process.env.TG_ADMIN_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
+  if (!adminIds.length) return;
+
+  let allTz;
+  try {
+    allTz = JSON.parse(await fs.readFile(TZ_FILE, 'utf8'));
+  } catch {
+    return;
+  }
+
+  const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+  const active = withFlags.filter((t) => t.status !== 'cancelled' && t.status !== 'production');
+
+  const overdue = active.filter((t) => t.flags.overdue);
+  const soon = active.filter((t) => t.flags.deadline_soon);
+  const missing = active.filter((t) => t.flags.missing_deadline);
+
+  const statusCounts = {};
+  for (const tz of allTz) statusCounts[tz.status] = (statusCounts[tz.status] || 0) + 1;
+  const inWork = allTz.filter((t) => !['draft', 'cancelled', 'production'].includes(t.status)).length;
+
+  const [d, m, y] = today.split('-').reverse();
+  const dateStr = `${d}.${m}.${y}`;
+
+  let text = `📋 <b>Дайджест ТЗ — ${dateStr}</b>\n`;
+
+  if (overdue.length) {
+    text += `\n🔴 <b>Просрочено: ${overdue.length}</b>\n`;
+    for (const t of overdue.slice(0, 5)) {
+      const deadline = t.flags.analysis_overdue ? `анализ до ${t.date_analysis_deadline}`
+        : t.flags.dev_overdue ? `разработка до ${t.date_dev_deadline}`
+        : `релиз до ${t.date_release_deadline}`;
+      text += `  • <code>${t.tz_code}</code> «${t.title}» — ${deadline} | owner: ${t.owner || '—'}\n`;
+    }
+  }
+
+  if (soon.length) {
+    text += `\n⚠️ <b>Скоро дедлайн (≤7 дней): ${soon.length}</b>\n`;
+    for (const t of soon.slice(0, 5)) {
+      const deadline = (t.flags.analysis_overdue === false && t.date_analysis_deadline) ? t.date_analysis_deadline
+        : t.date_dev_deadline || t.date_release_deadline || '';
+      text += `  • <code>${t.tz_code}</code> «${t.title}» — до ${deadline}\n`;
+    }
+  }
+
+  if (missing.length) {
+    text += `\n🟣 <b>Неполный дедлайн: ${missing.length}</b>\n`;
+    for (const t of missing.slice(0, 3)) {
+      const phase = TZ_STATUS_LABELS[t.status] || t.status;
+      text += `  • <code>${t.tz_code}</code> «${t.title}» — в ${phase.toLowerCase()}, нет дедлайна\n`;
+    }
+  }
+
+  if (!overdue.length && !soon.length && !missing.length) {
+    text += '\n✅ Все дедлайны в порядке\n';
+  }
+
+  text += `\n📊 Всего ТЗ: ${allTz.length} | В работе: ${inWork} | Завершено: ${statusCounts.production || 0} | Черновик: ${statusCounts.draft || 0}`;
+
+  for (const id of adminIds) {
+    await sendTelegram(id, text);
+  }
+  log(`[digest] sent to ${adminIds.length} admin(s)`);
+}
 
 function log(msg) {
   console.log(`[${new Date().toISOString()}] ${msg}`);
@@ -104,6 +202,13 @@ async function poll() {
   }
 }
 
+async function tick() {
+  await poll();
+  if (shouldRunDigest()) {
+    try { await sendTzDigest(); } catch (err) { log(`[digest] error: ${err.message}`); }
+  }
+}
+
 log('AI Worker started');
-setInterval(poll, POLL_INTERVAL);
-poll();
+setInterval(tick, POLL_INTERVAL);
+tick();

@@ -445,6 +445,15 @@ button{
 
 .admin-empty{text-align:center;color:var(--disabled);padding:32px 0;font-size:14px}
 
+/* Pagination */
+.admin-pagination{display:flex;align-items:center;gap:4px;margin:12px 0 4px;flex-wrap:wrap}
+.pg-btn{padding:4px 10px;border:1px solid var(--border);border-radius:6px;background:var(--card);color:var(--text);font-size:13px;cursor:pointer;line-height:1.4}
+.pg-btn:hover:not([disabled]):not(.active){background:var(--accent-soft)}
+.pg-btn.active{background:var(--primary);color:#fff;border-color:var(--primary)}
+.pg-btn[disabled]{opacity:.4;cursor:default}
+.pg-ellipsis{padding:0 4px;color:var(--text-sec)}
+.pg-info{margin-left:8px;font-size:12px;color:var(--text-sec);white-space:nowrap}
+
 /* ── Cancel, toggle, edit buttons ── */
 
 .btn-cancel-slot{

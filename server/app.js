@@ -5,10 +5,12 @@ import rateLimit from 'express-rate-limit';
 import multer from 'multer';
 import fs from 'node:fs/promises';
 import path from 'node:path';
-import { randomUUID } from 'node:crypto';
+import { randomUUID, scrypt, randomBytes, timingSafeEqual } from 'node:crypto';
+import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createTransport } from 'nodemailer';
 import ExcelJS from 'exceljs';
+import { computeTzFlags as _computeTzFlags, TZ_STATUS_ORD as _TZ_STATUS_ORD, TZ_STATUS_LABELS as _TZ_STATUS_LABELS } from './utils.js';
 
 dotenv.config();
 
@@ -132,8 +134,13 @@ async function sendEmail(to, subject, text) {
 
 const CRM_BOT_ADMIN_IDS = (process.env.CRM_BOT_ADMIN_IDS || process.env.TG_ADMIN_IDS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
-const CRM_BOT_TICKETS_FILE = path.resolve(rootDir, '../crm-support-bot/data/tickets.json');
-const CRM_BOT_EXCEL_FILE = path.resolve(rootDir, '../crm-support-bot/data/crm_support_log.xlsx');
+// Optional: set CRM_BOT_TICKETS_FILE in .env only if crm-support-bot is deployed alongside
+const CRM_BOT_TICKETS_FILE = process.env.CRM_BOT_TICKETS_FILE
+  ? path.resolve(process.env.CRM_BOT_TICKETS_FILE)
+  : path.resolve(rootDir, '../crm-support-bot/data/tickets.json');
+const CRM_BOT_EXCEL_FILE = process.env.CRM_BOT_EXCEL_FILE
+  ? path.resolve(process.env.CRM_BOT_EXCEL_FILE)
+  : path.resolve(rootDir, '../crm-support-bot/data/crm_support_log.xlsx');
 
 const EXCEL_HEADERS = ['Дата и время', 'Telegram ID', 'ФИО', 'Модуль', 'Тип обращения', 'Категория ошибки', 'Описание'];
 const EXCEL_COL_WIDTHS = [20, 14, 25, 22, 20, 30, 60];
@@ -160,6 +167,14 @@ async function appendToBotExcel(row) {
   await wb.xlsx.writeFile(CRM_BOT_EXCEL_FILE);
 }
 
+async function appendToBotExcelSafe(row) {
+  try {
+    await appendToBotExcel(row);
+  } catch (err) {
+    console.warn('[crm-bot-excel] skipped:', err.message);
+  }
+}
+
 async function tgSendWithButton(botToken, chatId, text, callbackData) {
   if (!botToken) return null;
   try {
@@ -184,28 +199,25 @@ async function tgSendWithButton(botToken, chatId, text, callbackData) {
 }
 
 async function createBotTicket(type, fio, module, category, description) {
-  const store = await readJson(CRM_BOT_TICKETS_FILE, { next_id: 1, items: {} });
-  const tid = store.next_id;
-  const now = new Date();
-  const pad = (n) => String(n).padStart(2, '0');
-  const createdAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
+  try {
+    const store = await readJson(CRM_BOT_TICKETS_FILE, { next_id: 1, items: {} });
+    const tid = store.next_id;
+    const now = new Date();
+    const pad = (n) => String(n).padStart(2, '0');
+    const createdAt = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
 
-  store.items[String(tid)] = {
-    type,
-    fio,
-    module,
-    category,
-    description,
-    status: 'new',
-    taken_by: null,
-    admin_messages: {},
-    group_message_id: null,
-    created_at: createdAt,
-    source: 'portal'
-  };
-  store.next_id = tid + 1;
-  await writeJson(CRM_BOT_TICKETS_FILE, store);
-  return tid;
+    store.items[String(tid)] = {
+      type, fio, module, category, description,
+      status: 'new', taken_by: null, admin_messages: {},
+      group_message_id: null, created_at: createdAt, source: 'portal'
+    };
+    store.next_id = tid + 1;
+    await writeJson(CRM_BOT_TICKETS_FILE, store);
+    return tid;
+  } catch (err) {
+    console.warn('[crm-bot-sync] createBotTicket skipped:', err.message);
+    return null;
+  }
 }
 
 /* ── CRM config ── */
@@ -333,6 +345,59 @@ async function withLock(key, fn) {
   finally { _locks.delete(key); resolve(); }
 }
 
+/* ── PIN crypto helpers ── */
+
+const scryptAsync = promisify(scrypt);
+
+async function hashPin(pin) {
+  const salt = randomBytes(16).toString('hex');
+  const hash = (await scryptAsync(pin, salt, 64)).toString('hex');
+  return { hash, salt };
+}
+
+async function verifyPin(pin, hash, salt) {
+  try {
+    const derived = await scryptAsync(pin, salt, 64);
+    return timingSafeEqual(Buffer.from(hash, 'hex'), derived);
+  } catch { return false; }
+}
+
+// Simple in-memory cache: pin → {userId, expires}
+const _pinCache = new Map();
+const PIN_CACHE_TTL = 5 * 60 * 1000;
+
+async function getUserByPin(pin) {
+  const cached = _pinCache.get(pin);
+  if (cached && cached.expires > Date.now()) {
+    const users = await readJson(FILES.users, []);
+    const u = users.find((x) => x.id === cached.userId);
+    if (u) return u;
+  }
+  const users = await readJson(FILES.users, []);
+  for (const u of users) {
+    if (u.pinHash && await verifyPin(pin, u.pinHash, u.pinSalt)) {
+      _pinCache.set(pin, { userId: u.id, expires: Date.now() + PIN_CACHE_TTL });
+      return u;
+    }
+  }
+  return null;
+}
+
+function invalidatePinCache(pin) { _pinCache.delete(pin); }
+
+async function migrateUsers() {
+  const data = await readJson(FILES.users, {});
+  if (Array.isArray(data)) return;
+  console.log('[migrate] users.json → array + scrypt hashing...');
+  const result = [];
+  for (const [pin, user] of Object.entries(data)) {
+    const { hash, salt } = await hashPin(pin);
+    result.push({ ...user, id: user.id || randomUUID(), pinHash: hash, pinSalt: salt });
+  }
+  await writeJson(FILES.users, result);
+  console.log(`[migrate] done: ${result.length} users`);
+}
+
 function isValidDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }
 
 function toTime(v) {
@@ -355,17 +420,6 @@ const TZ_TYPES = ['ТЗ', 'Дефект', 'Заявка'];
 const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
 const TZ_PRIORITIES = ['low', 'medium', 'high', 'critical'];
 
-const TZ_STATUS_LABELS = {
-  draft: 'Черновик',
-  review: 'На рассмотрении',
-  analysis: 'Анализ',
-  development: 'Разработка',
-  testing: 'Тестирование',
-  release: 'Релиз',
-  production: 'В продакшене',
-  cancelled: 'Отменено'
-};
-
 const TZ_TRANSITIONS = {
   draft: ['review', 'cancelled'],
   review: ['analysis', 'cancelled'],
@@ -377,47 +431,9 @@ const TZ_TRANSITIONS = {
   cancelled: ['draft']
 };
 
-const TZ_STATUS_ORD = { draft: 0, review: 1, analysis: 2, development: 3, testing: 4, release: 5, production: 6, cancelled: 99 };
-
-function computeTzFlags(tz) {
-  const now = new Date();
-  const today = now.toISOString().slice(0, 10);
-  const flags = {};
-  const ord = TZ_STATUS_ORD[tz.status] ?? 0;
-
-  // Дедлайн означает «фаза должна быть ЗАВЕРШЕНА к дате» → ТЗ должно продвинуться дальше
-  // date_analysis_deadline → ТЗ должно быть ≥ development (ord ≥ 3)
-  // date_dev_deadline      → ТЗ должно быть ≥ testing     (ord ≥ 4)
-  // date_release_deadline  → ТЗ должно быть ≥ production   (ord ≥ 6)
-  flags.analysis_overdue = !!tz.date_analysis_deadline && today > tz.date_analysis_deadline && ord < 3;
-  flags.dev_overdue = !!tz.date_dev_deadline && today > tz.date_dev_deadline && ord < 4;
-  flags.release_overdue = !!tz.date_release_deadline && today > tz.date_release_deadline && ord < 6;
-  flags.overdue = flags.analysis_overdue || flags.dev_overdue || flags.release_overdue;
-
-  // Скоро дедлайн (в пределах 7 дней) — ближайший непройденный дедлайн
-  const soon7 = new Date(now.getTime() + 7 * 86400000).toISOString().slice(0, 10);
-  const activeDeadline =
-    (ord < 3 && tz.date_analysis_deadline) ||
-    (ord < 4 && tz.date_dev_deadline) ||
-    (ord < 6 && tz.date_release_deadline) ||
-    null;
-  flags.deadline_soon = !flags.overdue && !!activeDeadline && activeDeadline <= soon7 && activeDeadline >= today;
-
-  // Нет дат вообще
-  flags.no_dates = !tz.date_analysis_deadline && !tz.date_dev_deadline && !tz.date_release_deadline;
-  // Нет ответственного
-  flags.no_owner = !tz.owner || tz.owner.trim() === '';
-
-  // Неполные дедлайны: ТЗ продвинулось, а дедлайн текущей фазы не задан
-  // (при условии что предыдущая фаза имела дедлайн — т.е. дедлайны ведутся)
-  // В разработке (ord=3): анализ прошёл, дедлайн анализа был → а дедлайн разработки не задали
-  // В тестировании/релизе (ord 4-5): были ранние дедлайны → а дедлайн релиза не задали
-  flags.missing_deadline =
-    (ord === 3 && !!tz.date_analysis_deadline && !tz.date_dev_deadline) ||
-    (ord >= 4 && ord <= 5 && (!!tz.date_analysis_deadline || !!tz.date_dev_deadline) && !tz.date_release_deadline);
-
-  return flags;
-}
+const TZ_STATUS_ORD = _TZ_STATUS_ORD;
+const TZ_STATUS_LABELS = _TZ_STATUS_LABELS;
+const computeTzFlags = _computeTzFlags;
 
 function generateTzCode(allTz, system) {
   const prefix = `TZ-${system}-`;
@@ -444,7 +460,7 @@ async function recordTzHistory(tzId, field, oldValue, newValue, changedBy) {
   await writeJson(FILES.tzHistory, history);
 }
 
-async function getUserRole(pin, user) {
+function getUserRole(pin, user) {
   if (ADMIN_PINS.has(pin)) return 'superadmin';
   if (!user) return null;
   if (user.role === 'superadmin' || user.role === 'it_admin') return user.role;
@@ -452,17 +468,8 @@ async function getUserRole(pin, user) {
   return null;
 }
 
-async function isAdmin(pin) {
-  const users = await readJson(FILES.users, {});
-  const role = await getUserRole(pin, users[pin]);
-  return !!role;
-}
-
-async function isSuperAdmin(pin) {
-  const users = await readJson(FILES.users, {});
-  const role = await getUserRole(pin, users[pin]);
-  return role === 'superadmin';
-}
+function isAdmin(pin, user) { return !!getUserRole(pin, user); }
+function isSuperAdmin(pin, user) { return getUserRole(pin, user) === 'superadmin'; }
 
 /* ── Auth ── */
 
@@ -479,13 +486,16 @@ app.post('/api/auth/register', registerLimiter, async (req, res) => {
     return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
 
   return withLock(FILES.users, async () => {
-    const users = await readJson(FILES.users, {});
-    if (users[pin])
+    // Check for duplicate PIN by verifying against all existing users
+    const existing = await getUserByPin(pin);
+    if (existing)
       return res.status(400).json({ message: 'Этот пин-код уже занят. Попробуйте другой.' });
 
-    users[pin] = { id: randomUUID(), fullName, contact, createdAt: new Date().toISOString() };
+    const { hash, salt } = await hashPin(pin);
+    const users = await readJson(FILES.users, []);
+    users.push({ id: randomUUID(), pinHash: hash, pinSalt: salt, fullName, contact, createdAt: new Date().toISOString() });
     await writeJson(FILES.users, users);
-    return res.status(201).json({ pin, fullName, contact });
+    return res.status(201).json({ fullName, contact });
   });
 });
 
@@ -494,11 +504,10 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   if (!/^\d{4}$/.test(pin))
     return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
 
-  const adminRole = await getUserRole(pin, users[pin]);
+  const adminRole = getUserRole(pin, user);
   return res.json({
     pin, fullName: user.fullName, contact: user.contact,
     position: user.position || '', userId: user.id,
@@ -563,11 +572,11 @@ app.get('/api/profile/:pin', async (req, res) => {
   if (!/^\d{4}$/.test(reqPin))
     return res.status(401).json({ message: 'Нужна авторизация.' });
 
-  const users = await readJson(FILES.users, {});
-  if (!users[reqPin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+  const requester = await getUserByPin(reqPin);
+  if (!requester) return res.status(401).json({ message: 'Неверный пин-код.' });
 
   const targetPin = req.params.pin;
-  const user = users[targetPin];
+  const user = await getUserByPin(targetPin);
   if (!user) return res.status(404).json({ message: 'Пользователь не найден.' });
 
   return res.json({
@@ -585,19 +594,25 @@ app.post('/api/profile/update', async (req, res) => {
   const workLocation = req.body.workLocation !== undefined ? clip(String(req.body.workLocation || '').trim(), 100) : undefined;
   const workDesk = req.body.workDesk !== undefined ? clip(String(req.body.workDesk || '').trim(), 10) : undefined;
 
-  const users = await readJson(FILES.users, {});
-  if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+  const userObj = await getUserByPin(pin);
+  if (!userObj) return res.status(401).json({ message: 'Неверный пин-код.' });
 
-  if (contact && contact.length >= 3) users[pin].contact = contact;
-  if (position !== undefined) users[pin].position = position;
-  if (workLocation !== undefined) users[pin].workLocation = workLocation;
-  if (workDesk !== undefined) users[pin].workDesk = workDesk;
+  return withLock(FILES.users, async () => {
+    const users = await readJson(FILES.users, []);
+    const u = users.find((x) => x.id === userObj.id);
+    if (!u) return res.status(401).json({ message: 'Неверный пин-код.' });
 
-  await writeJson(FILES.users, users);
-  return res.json({
-    message: 'Профиль обновлён.', contact: users[pin].contact,
-    position: users[pin].position || '',
-    workLocation: users[pin].workLocation || '', workDesk: users[pin].workDesk || ''
+    if (contact && contact.length >= 3) u.contact = contact;
+    if (position !== undefined) u.position = position;
+    if (workLocation !== undefined) u.workLocation = workLocation;
+    if (workDesk !== undefined) u.workDesk = workDesk;
+
+    await writeJson(FILES.users, users);
+    return res.json({
+      message: 'Профиль обновлён.', contact: u.contact,
+      position: u.position || '',
+      workLocation: u.workLocation || '', workDesk: u.workDesk || ''
+    });
   });
 });
 
@@ -611,23 +626,26 @@ app.post('/api/profile/avatar', (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'Выберите изображение (JPG, PNG, WebP).' });
 
     const pin = String(req.body.pin || '').trim();
-    const users = await readJson(FILES.users, {});
-    if (!users[pin]) {
+    const userObj = await getUserByPin(pin);
+    if (!userObj) {
       await fs.unlink(req.file.path).catch(() => {});
       return res.status(401).json({ message: 'Неверный пин-код.' });
     }
 
     const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
-    const safeName = `${users[pin].id}${ext}`;
+    const safeName = `${userObj.id}${ext}`;
     const finalPath = path.join(avatarsDir, safeName);
 
     // Remove old avatar if exists
-    if (users[pin].avatar) {
-      await fs.unlink(path.join(avatarsDir, users[pin].avatar)).catch(() => {});
+    if (userObj.avatar) {
+      await fs.unlink(path.join(avatarsDir, userObj.avatar)).catch(() => {});
     }
 
     await fs.rename(req.file.path, finalPath);
-    users[pin].avatar = safeName;
+
+    const users = await readJson(FILES.users, []);
+    const u = users.find((x) => x.id === userObj.id);
+    if (u) u.avatar = safeName;
     await writeJson(FILES.users, users);
 
     return res.json({ message: 'Фото загружено.', avatar: safeName });
@@ -669,8 +687,7 @@ app.post('/api/bookings', async (req, res) => {
   const endHour = toTime(req.body.endHour);
   const topic = clip(String(req.body.topic || '').trim(), 300);
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
 
   if (!roomId) return res.status(400).json({ message: 'Выберите переговорку.' });
@@ -715,8 +732,7 @@ app.post('/api/tickets', async (req, res) => {
   const category = String(req.body.category || '').trim();
   const description = clip(String(req.body.description || '').trim(), 2000);
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
 
   if (!['error', 'suggestion'].includes(type))
@@ -755,34 +771,40 @@ app.post('/api/tickets', async (req, res) => {
   try {
     const tid = await createBotTicket(botType, user.fullName, module, botCategory, description);
 
-    // Format matching bot.py _ticket_text()
-    const tgLines = [
-      `${botEmoji} <b>Новая заявка #${tid}: ${botType}</b>\n`,
-      `👤 ${user.fullName}`,
-      `📦 ${module}`
-    ];
-    if (botCategory && botCategory !== '—') tgLines.push(`📂 ${botCategory}`);
-    tgLines.push(`💬 ${description}`);
-    const tgText = tgLines.join('\n');
+    if (tid !== null) {
+      // Format matching bot.py _ticket_text()
+      const tgLines = [
+        `${botEmoji} <b>Новая заявка #${tid}: ${botType}</b>\n`,
+        `👤 ${user.fullName}`,
+        `📦 ${module}`
+      ];
+      if (botCategory && botCategory !== '—') tgLines.push(`📂 ${botCategory}`);
+      tgLines.push(`💬 ${description}`);
+      const tgText = tgLines.join('\n');
 
-    const adminMessages = {};
-    for (const adminId of CRM_BOT_ADMIN_IDS) {
-      const msgId = await tgSendWithButton(TG_TOKEN, adminId, tgText, `take:${tid}`);
-      if (msgId) adminMessages[String(adminId)] = msgId;
-    }
+      const adminMessages = {};
+      for (const adminId of CRM_BOT_ADMIN_IDS) {
+        const msgId = await tgSendWithButton(TG_TOKEN, adminId, tgText, `take:${tid}`);
+        if (msgId) adminMessages[String(adminId)] = msgId;
+      }
 
-    // Save message_ids back to bot ticket
-    const store = await readJson(CRM_BOT_TICKETS_FILE, { next_id: 1, items: {} });
-    if (store.items[String(tid)]) {
-      store.items[String(tid)].admin_messages = adminMessages;
-      await writeJson(CRM_BOT_TICKETS_FILE, store);
+      // Save message_ids back to bot ticket
+      try {
+        const store = await readJson(CRM_BOT_TICKETS_FILE, { next_id: 1, items: {} });
+        if (store.items[String(tid)]) {
+          store.items[String(tid)].admin_messages = adminMessages;
+          await writeJson(CRM_BOT_TICKETS_FILE, store);
+        }
+      } catch (err) {
+        console.warn('[crm-bot-sync] admin_messages save skipped:', err.message);
+      }
     }
 
     // Append to bot Excel log
     const now = new Date();
     const pad = (n) => String(n).padStart(2, '0');
     const ts = `${now.getFullYear()}-${pad(now.getMonth() + 1)}-${pad(now.getDate())} ${pad(now.getHours())}:${pad(now.getMinutes())}:${pad(now.getSeconds())}`;
-    await appendToBotExcel([ts, 'portal', user.fullName, module, botType, botCategory, description]);
+    await appendToBotExcelSafe([ts, 'portal', user.fullName, module, botType, botCategory, description]);
   } catch (err) {
     console.error('CRM bot sync failed:', err.message);
   }
@@ -801,8 +823,7 @@ app.post('/api/it-tickets', async (req, res) => {
   const seat = String(req.body.seat || '').trim();
   const description = clip(String(req.body.description || '').trim(), 2000);
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
 
   const cat = IT_CONFIG.categories.find((c) => c.id === category);
@@ -932,8 +953,8 @@ app.post('/api/my-it-tickets', async (req, res) => {
   if (!/^\d{4}$/.test(pin))
     return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
 
-  const users = await readJson(FILES.users, {});
-  if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
 
   const tickets = await readJson(FILES.itTickets, []);
   const my = tickets.filter((t) => t.pin === pin).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
@@ -959,8 +980,8 @@ app.post('/api/it-ticket-rate', async (req, res) => {
   if (!Number.isInteger(rating) || rating < 1 || rating > 5)
     return res.status(400).json({ message: 'Оценка от 1 до 5.' });
 
-  const users = await readJson(FILES.users, {});
-  if (!users[pin]) return res.status(401).json({ message: 'Неверный пин-код.' });
+  const rater = await getUserByPin(pin);
+  if (!rater) return res.status(401).json({ message: 'Неверный пин-код.' });
 
   return withLock(FILES.itTickets, async () => {
     const tickets = await readJson(FILES.itTickets, []);
@@ -986,8 +1007,7 @@ app.post('/api/suggestions', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const text = clip(String(req.body.text || '').trim(), 2000);
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
   if (!text || text.length < 5)
     return res.status(400).json({ message: 'Опишите предложение (минимум 5 символов).' });
@@ -1005,42 +1025,72 @@ app.post('/api/suggestions', async (req, res) => {
 
 /* ── Admin API (POST for security — pins not in URL) ── */
 
+/* ── Admin helpers ── */
+async function requireSuperAdmin(pin) {
+  const user = await getUserByPin(pin);
+  if (!isSuperAdmin(pin, user)) return null;
+  return user;
+}
+async function requireAdmin(pin) {
+  const user = await getUserByPin(pin);
+  if (!isAdmin(pin, user)) return null;
+  return user;
+}
+
+function paginate(items, page, pageSize) {
+  const total = items.length;
+  const p = Math.max(1, Number(page) || 1);
+  const ps = Math.min(200, Math.max(1, Number(pageSize) || 50));
+  const start = (p - 1) * ps;
+  return { items: items.slice(start, start + ps), total, page: p, pageSize: ps };
+}
+
 // superadmin-only endpoints
 app.post('/api/admin/bookings', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  return res.json(await readJson(FILES.bookings, []));
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { page, pageSize } = req.body;
+  const all = (await readJson(FILES.bookings, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(paginate(all, page, pageSize));
 });
 
 app.post('/api/admin/tickets', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  return res.json(await readJson(FILES.tickets, []));
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { page, pageSize } = req.body;
+  const all = (await readJson(FILES.tickets, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(paginate(all, page, pageSize));
 });
 
 // IT tickets — accessible by both superadmin and it_admin
 app.post('/api/admin/it-tickets', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  return res.json(await readJson(FILES.itTickets, []));
+  if (!(await requireAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { page, pageSize } = req.body;
+  const all = (await readJson(FILES.itTickets, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(paginate(all, page, pageSize));
 });
 
 app.post('/api/admin/suggestions', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  return res.json(await readJson(FILES.suggestions, []));
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { page, pageSize } = req.body;
+  const all = (await readJson(FILES.suggestions, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(paginate(all, page, pageSize));
 });
 
 app.post('/api/admin/pin-requests', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  return res.json(await readJson(FILES.pinRequests, []));
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { page, pageSize } = req.body;
+  const all = (await readJson(FILES.pinRequests, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(paginate(all, page, pageSize));
 });
 
 app.post('/api/admin/pin-request-resolve', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const requestId = String(req.body.requestId || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const requests = await readJson(FILES.pinRequests, []);
   const idx = requests.findIndex((r) => r.id === requestId);
@@ -1053,105 +1103,117 @@ app.post('/api/admin/pin-request-resolve', async (req, res) => {
 
 app.post('/api/admin/users', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  const users = await readJson(FILES.users, {});
-  const list = [];
-  for (const [p, u] of Object.entries(users)) {
-    const role = await getUserRole(p, u);
-    list.push({
-      pin: p, fullName: u.fullName, contact: u.contact,
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { page, pageSize } = req.body;
+  const users = await readJson(FILES.users, []);
+  const list = users.map((u) => {
+    const role = getUserRole('', u); // no plain pin available, rely on user object fields
+    return {
+      id: u.id, fullName: u.fullName, contact: u.contact,
       position: u.position || '', avatar: !!u.avatar,
       isAdmin: !!role, role: role || 'employee', createdAt: u.createdAt
-    });
-  }
-  return res.json(list);
+    };
+  }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  return res.json(paginate(list, page, pageSize));
 });
 
 app.post('/api/admin/update-user', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const targetPin = String(req.body.targetPin || '').trim();
+  const targetId = String(req.body.targetId || '').trim();
   const fullName = clip(String(req.body.fullName || '').trim(), 100);
   const contact = clip(String(req.body.contact || '').trim(), 200);
   const newPin = String(req.body.newPin || '').trim();
 
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
 
-  const users = await readJson(FILES.users, {});
-  if (!users[targetPin]) return res.status(404).json({ message: 'Пользователь не найден.' });
+  return withLock(FILES.users, async () => {
+    const users = await readJson(FILES.users, []);
+    const target = users.find((u) => u.id === targetId);
+    if (!target) return res.status(404).json({ message: 'Пользователь не найден.' });
 
-  if (fullName && fullName.length >= 3) users[targetPin].fullName = fullName;
-  else if (fullName) return res.status(400).json({ message: 'ФИО минимум 3 символа.' });
+    if (fullName && fullName.length >= 3) target.fullName = fullName;
+    else if (fullName) return res.status(400).json({ message: 'ФИО минимум 3 символа.' });
 
-  if (contact && contact.length >= 3) users[targetPin].contact = contact;
-  else if (contact) return res.status(400).json({ message: 'Контакт минимум 3 символа.' });
+    if (contact && contact.length >= 3) target.contact = contact;
+    else if (contact) return res.status(400).json({ message: 'Контакт минимум 3 символа.' });
 
-  if (newPin && newPin !== targetPin) {
-    if (!/^\d{4}$/.test(newPin))
-      return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
-    if (users[newPin])
-      return res.status(400).json({ message: 'Этот пин-код уже занят.' });
-    users[newPin] = users[targetPin];
-    delete users[targetPin];
-    const bookings = await readJson(FILES.bookings, []);
-    let changed = false;
-    for (const b of bookings) {
-      if (b.pin === targetPin) { b.pin = newPin; changed = true; }
+    if (newPin) {
+      if (!/^\d{4}$/.test(newPin))
+        return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
+      // Check duplicate
+      const dup = await getUserByPin(newPin);
+      if (dup && dup.id !== targetId)
+        return res.status(400).json({ message: 'Этот пин-код уже занят.' });
+      const { hash, salt } = await hashPin(newPin);
+      target.pinHash = hash;
+      target.pinSalt = salt;
+      // Invalidate any cached entry for old pin
+      for (const [cachedPin, cv] of _pinCache) {
+        if (cv.userId === targetId) { _pinCache.delete(cachedPin); break; }
+      }
+      // Update bookings by fullName (since we no longer store old pin)
+      const bookings = await readJson(FILES.bookings, []);
+      let changed = false;
+      for (const b of bookings) {
+        if (b.fullName === target.fullName) { b.pin = newPin; changed = true; }
+      }
+      if (changed) await writeJson(FILES.bookings, bookings);
     }
-    if (changed) await writeJson(FILES.bookings, bookings);
-  }
 
-  await writeJson(FILES.users, users);
-  return res.json({ message: 'Данные обновлены.' });
+    await writeJson(FILES.users, users);
+    return res.json({ message: 'Данные обновлены.' });
+  });
 });
 
 app.post('/api/admin/toggle-admin', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const targetPin = String(req.body.targetPin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
+  const targetId = String(req.body.targetId || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
 
-  const users = await readJson(FILES.users, {});
-  if (!users[targetPin]) return res.status(404).json({ message: 'Пользователь не найден.' });
+  const users = await readJson(FILES.users, []);
+  const target = users.find((u) => u.id === targetId);
+  if (!target) return res.status(404).json({ message: 'Пользователь не найден.' });
 
-  users[targetPin].isAdmin = !users[targetPin].isAdmin;
+  target.isAdmin = !target.isAdmin;
   await writeJson(FILES.users, users);
-  return res.json({ pin: targetPin, isAdmin: !!users[targetPin].isAdmin });
+  return res.json({ id: targetId, isAdmin: !!target.isAdmin });
 });
 
 app.post('/api/admin/set-role', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const targetPin = String(req.body.targetPin || '').trim();
+  const targetId = String(req.body.targetId || '').trim();
   const role = String(req.body.role || '').trim();
 
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  if (!targetPin) return res.status(400).json({ message: 'Укажите пин пользователя.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
   if (!['superadmin', 'it_admin', 'employee'].includes(role))
     return res.status(400).json({ message: 'Роль: superadmin, it_admin или employee.' });
 
-  const users = await readJson(FILES.users, {});
-  if (!users[targetPin]) return res.status(404).json({ message: 'Пользователь не найден.' });
+  const users = await readJson(FILES.users, []);
+  const target = users.find((u) => u.id === targetId);
+  if (!target) return res.status(404).json({ message: 'Пользователь не найден.' });
 
   if (role === 'employee') {
-    delete users[targetPin].role;
-    users[targetPin].isAdmin = false;
+    delete target.role;
+    target.isAdmin = false;
   } else {
-    users[targetPin].role = role;
-    users[targetPin].isAdmin = true;
+    target.role = role;
+    target.isAdmin = true;
   }
 
   await writeJson(FILES.users, users);
-  return res.json({ pin: targetPin, role });
+  return res.json({ id: targetId, role });
 });
 
 /* ── Booking cancel ── */
 
 app.post('/api/bookings/:id/cancel', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
-  const admin = await isAdmin(pin);
+  const admin = isAdmin(pin, user);
 
   return withLock(FILES.bookings, async () => {
     const bookings = await readJson(FILES.bookings, []);
@@ -1171,10 +1233,9 @@ app.patch('/api/bookings/:id', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   const cancelHour = toTime(req.body.cancelHour);
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
-  const admin = await isAdmin(pin);
+  const admin = isAdmin(pin, user);
 
   return withLock(FILES.bookings, async () => {
     const bookings = await readJson(FILES.bookings, []);
@@ -1234,7 +1295,8 @@ app.get('/api/tz-config', (_req, res) => {
 
 app.post('/api/tz', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
 
   const title = clip(String(req.body.title || '').trim(), 300);
   const system = String(req.body.system || '').trim();
@@ -1275,8 +1337,7 @@ app.post('/api/tz', async (req, res) => {
     if (duplicate) return res.status(400).json({ message: `ТЗ с таким названием уже существует: ${duplicate.tz_code}.` });
 
     const tzCode = generateTzCode(allTz, system);
-    const users = await readJson(FILES.users, {});
-    const creatorName = users[pin]?.fullName || pin;
+    const creatorName = authUser.fullName || pin;
 
     const tz = {
       id: randomUUID(),
@@ -1307,7 +1368,8 @@ app.post('/api/tz', async (req, res) => {
 
 app.put('/api/tz/:id', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
 
   const id = req.params.id;
 
@@ -1316,8 +1378,7 @@ app.put('/api/tz/:id', async (req, res) => {
     const tz = allTz.find((t) => t.id === id);
     if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
 
-    const users = await readJson(FILES.users, {});
-    const changedBy = users[pin]?.fullName || pin;
+    const changedBy = authUser.fullName || pin;
 
     const editableFields = [
       'title', 'system', 'type', 'priority', 'status',
@@ -1378,7 +1439,7 @@ app.put('/api/tz/:id', async (req, res) => {
 
 app.post('/api/admin/tz', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
 
@@ -1413,12 +1474,13 @@ app.post('/api/admin/tz', async (req, res) => {
   if (fMissingDeadline) items = items.filter((t) => t.flags.missing_deadline);
 
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
-  return res.json(items);
+  const { page, pageSize } = req.body;
+  return res.json(paginate(items, page, pageSize));
 });
 
 app.get('/api/tz/:id', async (req, res) => {
   const reqPin = String(req.query.pin || '').trim();
-  if (!(await isSuperAdmin(reqPin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(reqPin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const id = req.params.id;
   const allTz = await readJson(FILES.tz, []);
@@ -1434,7 +1496,7 @@ app.get('/api/tz/:id', async (req, res) => {
 
 app.post('/api/admin/tz-stats', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
   const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
@@ -1464,7 +1526,7 @@ app.post('/api/admin/tz-stats', async (req, res) => {
 
 app.post('/api/admin/tz-export', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
 
@@ -1557,13 +1619,12 @@ app.post('/api/admin/tz-export', async (req, res) => {
 
 app.post('/api/admin/ai-task', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const prompt = String(req.body.prompt || '').trim();
   if (prompt.length < 3) return res.status(400).json({ message: 'Промпт минимум 3 символа.' });
 
-  const users = await readJson(FILES.users, {});
-  const user = users[pin];
+  const aiAuthor = await getUserByPin(pin);
 
   return withLock(FILES.aiTasks, async () => {
     const tasks = await readJson(FILES.aiTasks, []);
@@ -1572,7 +1633,7 @@ app.post('/api/admin/ai-task', async (req, res) => {
       prompt: prompt.slice(0, 4000),
       status: 'pending',
       result: null,
-      created_by: user ? user.fullName : 'superadmin',
+      created_by: aiAuthor ? aiAuthor.fullName : 'superadmin',
       created_at: new Date().toISOString(),
       started_at: null,
       finished_at: null
@@ -1585,7 +1646,7 @@ app.post('/api/admin/ai-task', async (req, res) => {
 
 app.post('/api/admin/ai-tasks', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const tasks = await readJson(FILES.aiTasks, []);
   const sorted = tasks.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 50);
@@ -1594,7 +1655,7 @@ app.post('/api/admin/ai-tasks', async (req, res) => {
 
 app.post('/api/admin/ai-task-cancel', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const taskId = String(req.body.taskId || '').trim();
   if (!taskId) return res.status(400).json({ message: 'Укажите taskId.' });
@@ -1617,6 +1678,13 @@ app.get('*', (_req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
 
-app.listen(port, () => {
-  console.log(`LKDS portal started on http://localhost:${port}`);
-});
+migrateUsers()
+  .then(() => {
+    app.listen(port, () => {
+      console.log(`LKDS portal started on http://localhost:${port}`);
+    });
+  })
+  .catch((err) => {
+    console.error('Migration failed, aborting:', err);
+    process.exit(1);
+  });

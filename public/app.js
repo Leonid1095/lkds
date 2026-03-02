@@ -153,7 +153,8 @@ const state = {
   tzConfig: null,
   tzFilters: { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false, missing_deadline: false },
   tzList: [],
-  tzEditId: null
+  tzEditId: null,
+  adminPage: {} // { [type]: currentPage }
 };
 
 /* ── Helpers ── */
@@ -1136,17 +1137,42 @@ document.querySelectorAll('.admin-tab').forEach((tab) => {
   });
 });
 
-async function loadAdminData(type) {
+const ADMIN_PAGE_SIZE = 50;
+
+async function loadAdminData(type, page) {
+  if (page !== undefined) state.adminPage[type] = page;
+  const currentPage = state.adminPage[type] || 1;
   try {
     const data = await api(`/api/admin/${type}`, {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({ pin: state.pin, page: currentPage, pageSize: ADMIN_PAGE_SIZE })
     });
     renderAdminTable(type, data);
   } catch (err) {
     adminContent.innerHTML = `<p class="message error">${esc(err.message)}</p>`;
   }
+}
+
+function renderPagination(type, page, pageSize, total) {
+  const totalPages = Math.ceil(total / pageSize);
+  if (totalPages <= 1) return '';
+  const p = page;
+  let html = '<div class="admin-pagination">';
+  html += `<button class="pg-btn" data-pg-type="${type}" data-pg="${p - 1}"${p <= 1 ? ' disabled' : ''}>«</button>`;
+  const start = Math.max(1, p - 2);
+  const end = Math.min(totalPages, p + 2);
+  if (start > 1) html += `<button class="pg-btn" data-pg-type="${type}" data-pg="1">1</button>`;
+  if (start > 2) html += '<span class="pg-ellipsis">…</span>';
+  for (let i = start; i <= end; i++) {
+    html += `<button class="pg-btn${i === p ? ' active' : ''}" data-pg-type="${type}" data-pg="${i}">${i}</button>`;
+  }
+  if (end < totalPages - 1) html += '<span class="pg-ellipsis">…</span>';
+  if (end < totalPages) html += `<button class="pg-btn" data-pg-type="${type}" data-pg="${totalPages}">${totalPages}</button>`;
+  html += `<button class="pg-btn" data-pg-type="${type}" data-pg="${p + 1}"${p >= totalPages ? ' disabled' : ''}>»</button>`;
+  html += `<span class="pg-info">${(p - 1) * pageSize + 1}–${Math.min(p * pageSize, total)} из ${total}</span>`;
+  html += '</div>';
+  return html;
 }
 
 function fmtDate(iso) {
@@ -1157,7 +1183,12 @@ function fmtDate(iso) {
 
 let adminUsersCache = [];
 
-function renderAdminTable(type, data) {
+function renderAdminTable(type, response) {
+  // Support both paginated {items, total, page, pageSize} and legacy array responses
+  const isPaginated = response && typeof response === 'object' && !Array.isArray(response) && Array.isArray(response.items);
+  const data = isPaginated ? response.items : (Array.isArray(response) ? response : []);
+  const { total = data.length, page = 1, pageSize = ADMIN_PAGE_SIZE } = isPaginated ? response : {};
+
   if (!data.length) {
     adminContent.innerHTML = '<p class="admin-empty">Пока пусто</p>';
     return;
@@ -1220,24 +1251,22 @@ function renderAdminTable(type, data) {
       </tr>`;
     }
   } else if (type === 'users') {
-    html += '<tr><th>Пин</th><th>ФИО</th><th>Контакт</th><th>Роль</th><th>Дата</th><th></th></tr>';
+    html += '<tr><th>ФИО</th><th>Контакт</th><th>Роль</th><th>Дата</th><th></th></tr>';
     const roleLabels = { superadmin: 'Суперадмин', it_admin: 'ИТ-админ', employee: 'Сотрудник' };
-    for (const u of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
+    for (const u of data) {
       const role = u.role || 'employee';
-      const roleLabel = roleLabels[role] || 'Сотрудник';
       html += `<tr>
-        <td>${esc(u.pin)}</td>
         <td>${esc(u.fullName)}</td>
         <td>${esc(u.contact)}</td>
         <td>
-          <select class="role-select" data-action="set-role" data-pin="${esc(u.pin)}">
+          <select class="role-select" data-action="set-role" data-id="${esc(u.id)}">
             <option value="employee"${role === 'employee' ? ' selected' : ''}>Сотрудник</option>
             <option value="it_admin"${role === 'it_admin' ? ' selected' : ''}>ИТ-админ</option>
             <option value="superadmin"${role === 'superadmin' ? ' selected' : ''}>Суперадмин</option>
           </select>
         </td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
-        <td><button class="btn-edit-user" data-action="edit-user" data-pin="${esc(u.pin)}">Ред.</button></td>
+        <td><button class="btn-edit-user" data-action="edit-user" data-id="${esc(u.id)}">Ред.</button></td>
       </tr>`;
     }
   } else if (type === 'pin-requests') {
@@ -1253,7 +1282,16 @@ function renderAdminTable(type, data) {
   }
 
   html += '</table>';
+  html += renderPagination(type, page, pageSize, total);
   adminContent.innerHTML = html;
+
+  // Pagination button handlers
+  adminContent.querySelectorAll('.pg-btn:not([disabled])').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      const pg = Number(btn.dataset.pg);
+      if (pg >= 1) loadAdminData(btn.dataset.pgType, pg);
+    });
+  });
 
   // Event delegation for admin actions
   adminContent.querySelectorAll('[data-action]').forEach((el) => {
@@ -1292,7 +1330,7 @@ async function handleAdminAction(e) {
       await api('/api/admin/set-role', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, targetPin: btn.dataset.pin, role })
+        body: JSON.stringify({ pin: state.pin, targetId: btn.dataset.id, role })
       });
       loadAdminData('users');
     } catch (err) { adminMsg(err.message); }
@@ -1309,12 +1347,12 @@ async function handleAdminAction(e) {
     } catch (err) { adminMsg(err.message); }
 
   } else if (action === 'edit-user') {
-    const u = adminUsersCache.find((x) => x.pin === btn.dataset.pin);
+    const u = adminUsersCache.find((x) => x.id === btn.dataset.id);
     if (!u) return;
-    editUserOriginalPin.value = u.pin;
+    editUserOriginalPin.value = u.id; // repurposed: stores user id
     editUserName.value = u.fullName;
     editUserContact.value = u.contact;
-    editUserPin.value = u.pin;
+    editUserPin.value = ''; // blank — admin fills new pin only if changing
     msg(editUserMessage, '');
     show(editUserPopup);
   }
@@ -1334,7 +1372,7 @@ editUserForm.addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
         pin: state.pin,
-        targetPin: editUserOriginalPin.value,
+        targetId: editUserOriginalPin.value,
         fullName: editUserName.value.trim(),
         contact: editUserContact.value.trim(),
         newPin: editUserPin.value.trim()
