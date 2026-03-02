@@ -113,6 +113,14 @@ const tzMeta = $('tzMeta');
 const tzHistorySection = $('tzHistorySection');
 const tzHistoryList = $('tzHistoryList');
 
+/* ── AI DOM ── */
+const tabAi = $('tabAi');
+const aiChat = $('aiChat');
+const aiPromptInput = $('aiPromptInput');
+const aiSendBtn = $('aiSendBtn');
+const aiMessage = $('aiMessage');
+let aiRefreshInterval = null;
+
 /* ── IT config (loaded from API, fallback hardcoded) ── */
 
 let IT_CATEGORIES = [
@@ -193,6 +201,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     const panelName = tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1);
     $('panel' + panelName).classList.add('active');
     if (tab.dataset.tab === 'tz') loadTzData();
+    if (tab.dataset.tab === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
   });
 });
 
@@ -234,6 +243,8 @@ function showMain() {
     hide(adminBtn);
   }
   tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+  tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+  updateTzBadge();
 }
 
 function showAuth() {
@@ -264,6 +275,7 @@ loginForm.addEventListener('submit', async (e) => {
     localStorage.setItem('lkds_pin', data.pin);
     showMain();
     await loadApp();
+    showTzNotifications();
   } catch (err) {
     msg(loginMessage, err.message, 'error');
   }
@@ -481,11 +493,13 @@ function openBookingPopup(from) {
 }
 
 popupCancel.addEventListener('click', () => hide(bookingPopup));
-bookingPopup.addEventListener('click', (e) => { if (e.target === bookingPopup) hide(bookingPopup); });
+bookingPopup.addEventListener('click', (e) => { if (e.target === bookingPopup && confirm('Закрыть окно?')) hide(bookingPopup); });
 
 popupBookingForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   msg(popupMessage, '');
+  const btn = popupBookingForm.querySelector('button[type="submit"]');
+  btn.disabled = true;
   try {
     await api('/api/bookings', {
       method: 'POST',
@@ -504,6 +518,8 @@ popupBookingForm.addEventListener('submit', async (e) => {
     await loadBookings();
   } catch (err) {
     msg(popupMessage, err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 });
 
@@ -576,17 +592,19 @@ async function doSlotCancel(bookingId, slotHour) {
 cancelEntireBtn.addEventListener('click', () => doFullCancel(cancelPopup._bookingId));
 cancelSlotBtn.addEventListener('click', () => doSlotCancel(cancelPopup._bookingId, cancelPopup._slotHour));
 cancelDismissBtn.addEventListener('click', () => hide(cancelPopup));
-cancelPopup.addEventListener('click', (e) => { if (e.target === cancelPopup) hide(cancelPopup); });
+cancelPopup.addEventListener('click', (e) => { if (e.target === cancelPopup && confirm('Закрыть окно?')) hide(cancelPopup); });
 
 /* ── Suggest popup ── */
 
 suggestBtn.addEventListener('click', () => { suggestForm.reset(); msg(suggestMessage, ''); show(suggestPopup); });
 suggestCancel.addEventListener('click', () => hide(suggestPopup));
-suggestPopup.addEventListener('click', (e) => { if (e.target === suggestPopup) hide(suggestPopup); });
+suggestPopup.addEventListener('click', (e) => { if (e.target === suggestPopup && confirm('Закрыть окно?')) hide(suggestPopup); });
 
 suggestForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   msg(suggestMessage, '');
+  const btn = suggestForm.querySelector('button[type="submit"]');
+  btn.disabled = true;
   try {
     const result = await api('/api/suggestions', {
       method: 'POST',
@@ -598,6 +616,8 @@ suggestForm.addEventListener('submit', async (e) => {
     setTimeout(() => hide(suggestPopup), 1500);
   } catch (err) {
     msg(suggestMessage, err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 });
 
@@ -661,7 +681,7 @@ async function openProfile(pin) {
 }
 
 profileCloseBtn.addEventListener('click', () => hide(profilePopup));
-profilePopup.addEventListener('click', (e) => { if (e.target === profilePopup) hide(profilePopup); });
+profilePopup.addEventListener('click', (e) => { if (e.target === profilePopup && confirm('Закрыть окно?')) hide(profilePopup); });
 
 profileWorkLocation.addEventListener('change', () => {
   if (profileWorkLocation.value === 'Офис 2 этаж') show(profileWorkDeskField);
@@ -785,6 +805,8 @@ function renderCrmConfig() {
 ticketForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   msg(ticketMessage, '');
+  const btn = ticketForm.querySelector('button[type="submit"]');
+  btn.disabled = true;
   const fd = Object.fromEntries(new FormData(ticketForm).entries());
   fd.pin = state.pin;
   try {
@@ -797,6 +819,8 @@ ticketForm.addEventListener('submit', async (e) => {
     msg(ticketMessage, result.message, 'success');
   } catch (err) {
     msg(ticketMessage, err.message, 'error');
+  } finally {
+    btn.disabled = false;
   }
 });
 
@@ -1298,7 +1322,7 @@ async function handleAdminAction(e) {
 /* ── Edit user popup (admin) ── */
 
 editUserCancel.addEventListener('click', () => hide(editUserPopup));
-editUserPopup.addEventListener('click', (e) => { if (e.target === editUserPopup) hide(editUserPopup); });
+editUserPopup.addEventListener('click', (e) => { if (e.target === editUserPopup && confirm('Закрыть окно?')) hide(editUserPopup); });
 
 editUserForm.addEventListener('submit', async (e) => {
   e.preventDefault();
@@ -1413,6 +1437,62 @@ async function rateItTicket(ticketId, rating) {
   }
 }
 
+/* ── Toast notifications ── */
+
+const toastContainer = $('toastContainer');
+
+function showToast(text, type = 'danger', duration = 7000) {
+  const el = document.createElement('div');
+  el.className = `toast toast-${type}`;
+  el.textContent = text;
+  el.addEventListener('click', () => dismissToast(el));
+  toastContainer.appendChild(el);
+  setTimeout(() => dismissToast(el), duration);
+}
+
+function dismissToast(el) {
+  if (!el.parentNode) return;
+  el.style.animation = 'toastFadeOut .3s ease-in forwards';
+  el.addEventListener('animationend', () => el.remove());
+}
+
+/* ── TZ Badge & Notifications ── */
+
+async function updateTzBadge() {
+  if (state.adminRole !== 'superadmin') return;
+  try {
+    const stats = await api('/api/admin/tz-stats', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
+    const problems = (stats.overdue || 0) + (stats.deadline_soon || 0);
+    const badge = tabTz.querySelector('.tab-count-badge');
+    if (problems > 0) {
+      if (badge) {
+        badge.textContent = problems;
+      } else {
+        tabTz.insertAdjacentHTML('beforeend', `<span class="tab-count-badge">${problems}</span>`);
+      }
+    } else if (badge) {
+      badge.remove();
+    }
+    return stats;
+  } catch { return null; }
+}
+
+async function showTzNotifications() {
+  if (state.adminRole !== 'superadmin') return;
+  const stats = await updateTzBadge();
+  if (!stats) return;
+  const parts = [];
+  if (stats.overdue > 0) parts.push(`${stats.overdue} ТЗ просрочено`);
+  if (stats.deadline_soon > 0) parts.push(`${stats.deadline_soon} скоро дедлайн`);
+  if (parts.length > 0) {
+    showToast(`\u26A0 Внимание: ${parts.join(', ')}`, stats.overdue > 0 ? 'danger' : 'warn');
+  }
+}
+
 /* ── TZ (Технические задания) ── */
 
 const TZ_PRIO_LABELS = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
@@ -1450,6 +1530,7 @@ function renderTzFilters() {
       <select class="tz-filter-select" id="tzFilterType">${typeOpts}</select>
       <select class="tz-filter-select" id="tzFilterPriority">${prioOpts}</select>
       <input class="tz-filter-search" id="tzFilterSearch" placeholder="Поиск..." value="${esc(f.search)}" />
+      <button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
       <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать ТЗ</button>
     </div>
     <div class="tz-filters-row">
@@ -1484,15 +1565,50 @@ function renderTzFilters() {
 
   const createBtn = document.getElementById('tzCreateBtn');
   if (createBtn) createBtn.addEventListener('click', openTzCreateForm);
+
+  const exportBtn = document.getElementById('tzExportBtn');
+  if (exportBtn) exportBtn.addEventListener('click', exportTzExcel);
+}
+
+async function exportTzExcel() {
+  const btn = document.getElementById('tzExportBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const res = await fetch('/api/admin/tz-export', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, ...state.tzFilters })
+    });
+    if (!res.ok) {
+      const err = await res.json().catch(() => ({}));
+      throw new Error(err.message || 'Ошибка экспорта');
+    }
+    const blob = await res.blob();
+    const dateStr = new Date().toISOString().slice(0, 10);
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `tz_export_${dateStr}.xlsx`;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    URL.revokeObjectURL(url);
+  } catch (err) {
+    msg(tzMessage, err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+  }
 }
 
 function renderTzStats(stats) {
   if (!tzStatsBar) return;
+  const overduePulse = stats.overdue > 0 ? ' tz-stat-pulse' : '';
+  const soonPulse = stats.deadline_soon > 0 ? ' tz-stat-pulse' : '';
   tzStatsBar.innerHTML = `
     <div class="tz-stats-row">
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.total}</div><div class="tz-stat-label">Всего</div></div>
-      <div class="tz-stat-card tz-stat-danger"><div class="tz-stat-num">${stats.overdue}</div><div class="tz-stat-label">Просрочено</div></div>
-      <div class="tz-stat-card tz-stat-warn"><div class="tz-stat-num">${stats.deadline_soon}</div><div class="tz-stat-label">Скоро</div></div>
+      <div class="tz-stat-card tz-stat-danger${overduePulse}"><div class="tz-stat-num">${stats.overdue}</div><div class="tz-stat-label">Просрочено</div></div>
+      <div class="tz-stat-card tz-stat-warn${soonPulse}"><div class="tz-stat-num">${stats.deadline_soon}</div><div class="tz-stat-label">Скоро</div></div>
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_dates}</div><div class="tz-stat-label">Без дат</div></div>
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_owner}</div><div class="tz-stat-label">Без ответств.</div></div>
     </div>`;
@@ -1556,6 +1672,7 @@ async function loadTzData() {
     state.tzList = items;
     renderTzStats(stats);
     renderTzList(items);
+    updateTzBadge();
   } catch (err) {
     msg(tzMessage, err.message, 'error');
   }
@@ -1713,7 +1830,7 @@ tzForm.addEventListener('submit', async (e) => {
 
 // TZ popup close
 tzCancelBtn.addEventListener('click', () => hide(tzPopup));
-tzPopup.addEventListener('click', (e) => { if (e.target === tzPopup) hide(tzPopup); });
+tzPopup.addEventListener('click', (e) => { if (e.target === tzPopup && confirm('Закрыть окно?')) hide(tzPopup); });
 
 /* ── IT Status page (standalone, for sysadmin) ── */
 
@@ -1800,6 +1917,99 @@ async function loadItStatus(ticketId) {
   }
 }
 
+/* ── AI Agent ── */
+
+function startAiRefresh() {
+  stopAiRefresh();
+  aiRefreshInterval = setInterval(loadAiTasks, 5000);
+}
+
+function stopAiRefresh() {
+  if (aiRefreshInterval) { clearInterval(aiRefreshInterval); aiRefreshInterval = null; }
+}
+
+async function loadAiTasks() {
+  if (!state.pin || state.adminRole !== 'superadmin') return;
+  try {
+    const tasks = await api('/api/admin/ai-tasks', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
+    renderAiChat(tasks);
+  } catch (err) {
+    msg(aiMessage, err.message, 'error');
+  }
+}
+
+function renderAiChat(tasks) {
+  // Render chronologically (oldest first)
+  const sorted = [...tasks].reverse();
+  aiChat.innerHTML = sorted.map((t) => {
+    const time = new Date(t.created_at).toLocaleString('ru-RU', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' });
+    let html = `<div class="ai-msg ai-msg-user"><div class="ai-msg-bubble">${esc(t.prompt)}</div><div class="ai-msg-meta">${esc(t.created_by)} &middot; ${time}</div></div>`;
+
+    if (t.status === 'pending') {
+      html += `<div class="ai-msg ai-msg-bot ai-msg-pending"><div class="ai-msg-bubble">Ожидание...</div><button class="btn-cancel-sm ai-cancel-btn" data-id="${t.id}">Отменить</button></div>`;
+    } else if (t.status === 'running') {
+      html += `<div class="ai-msg ai-msg-bot ai-msg-pending"><div class="ai-msg-bubble">Выполняется...</div></div>`;
+    } else if (t.status === 'done') {
+      html += `<div class="ai-msg ai-msg-bot"><div class="ai-msg-bubble">${esc(t.result || '(пустой ответ)')}</div></div>`;
+    } else if (t.status === 'error') {
+      html += `<div class="ai-msg ai-msg-bot ai-msg-error"><div class="ai-msg-bubble">${esc(t.result || 'Ошибка')}</div></div>`;
+    } else if (t.status === 'cancelled') {
+      html += `<div class="ai-msg ai-msg-bot ai-msg-cancelled"><div class="ai-msg-bubble">Отменено</div></div>`;
+    }
+    return html;
+  }).join('');
+
+  // Scroll to bottom
+  aiChat.scrollTop = aiChat.scrollHeight;
+
+  // Cancel button handlers
+  aiChat.querySelectorAll('.ai-cancel-btn').forEach((btn) => {
+    btn.addEventListener('click', () => cancelAiTask(btn.dataset.id));
+  });
+}
+
+async function submitAiTask() {
+  const prompt = aiPromptInput.value.trim();
+  if (prompt.length < 3) { msg(aiMessage, 'Минимум 3 символа', 'error'); return; }
+  msg(aiMessage, '');
+  aiSendBtn.disabled = true;
+  try {
+    await api('/api/admin/ai-task', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, prompt })
+    });
+    aiPromptInput.value = '';
+    await loadAiTasks();
+  } catch (err) {
+    msg(aiMessage, err.message, 'error');
+  } finally {
+    aiSendBtn.disabled = false;
+  }
+}
+
+async function cancelAiTask(taskId) {
+  try {
+    await api('/api/admin/ai-task-cancel', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, taskId })
+    });
+    await loadAiTasks();
+  } catch (err) {
+    msg(aiMessage, err.message, 'error');
+  }
+}
+
+aiSendBtn.addEventListener('click', submitAiTask);
+aiPromptInput.addEventListener('keydown', (e) => {
+  if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAiTask(); }
+});
+
 /* ── Init ── */
 
 // Check if this is the standalone IT status page
@@ -1811,7 +2021,7 @@ if (itStatusMatch) {
 
   (async () => {
     const loggedIn = await tryAutoLogin();
-    if (loggedIn) { showMain(); await loadApp(); }
+    if (loggedIn) { showMain(); await loadApp(); showTzNotifications(); }
     else { showAuth(); }
   })();
 }

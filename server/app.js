@@ -40,7 +40,8 @@ const FILES = {
   suggestions: path.join(dataDir, 'suggestions.json'),
   pinRequests: path.join(dataDir, 'pin-requests.json'),
   tz: path.join(dataDir, 'tz.json'),
-  tzHistory: path.join(dataDir, 'tz-history.json')
+  tzHistory: path.join(dataDir, 'tz-history.json'),
+  aiTasks: path.join(dataDir, 'ai-tasks.json')
 };
 
 /* ── Security middleware ── */
@@ -717,12 +718,21 @@ app.post('/api/tickets', async (req, res) => {
     return res.status(400).json({ message: 'Опишите подробнее (минимум 10 символов).' });
 
   const tickets = await readJson(FILES.tickets, []);
+
+  // Защита от дубликатов: тот же пользователь + тот же текст за 30 секунд
+  const now = new Date();
+  const dup = tickets.find(t =>
+    t.fullName === user.fullName && t.description === description &&
+    (now - new Date(t.createdAt)) < 30000
+  );
+  if (dup) return res.status(409).json({ message: 'Заявка уже отправлена. Подождите перед повторной отправкой.' });
+
   const ticket = {
     id: randomUUID(), type,
     fullName: user.fullName, contact: user.contact,
     module, category: type === 'error' ? category : '—',
     description, status: 'new',
-    createdAt: new Date().toISOString()
+    createdAt: now.toISOString()
   };
   tickets.push(ticket);
   await writeJson(FILES.tickets, tickets);
@@ -798,6 +808,15 @@ app.post('/api/it-tickets', async (req, res) => {
   }
 
   const tickets = await readJson(FILES.itTickets, []);
+
+  // Защита от дубликатов: тот же пользователь + та же категория за 30 секунд
+  const now = new Date();
+  const dup = tickets.find(t =>
+    t.pin === pin && t.category === cat.label && t.description === (description || '—') &&
+    (now - new Date(t.createdAt)) < 30000
+  );
+  if (dup) return res.status(409).json({ message: 'Заявка уже отправлена. Подождите перед повторной отправкой.' });
+
   const ticket = {
     id: randomUUID(), pin, category: cat.label,
     subcategory: category === 'other' ? (description || '—') : (subcategory || '—'),
@@ -806,7 +825,7 @@ app.post('/api/it-tickets', async (req, res) => {
     fullName: user.fullName, contact: user.contact,
     status: 'new', statusUpdatedAt: null, takenBy: null,
     rating: null, ratingComment: null, forwardedToApi: false,
-    createdAt: new Date().toISOString()
+    createdAt: now.toISOString()
   };
   tickets.push(ticket);
   await writeJson(FILES.itTickets, tickets);
@@ -1228,6 +1247,11 @@ app.post('/api/tz', async (req, res) => {
 
   return withLock(FILES.tz, async () => {
     const allTz = await readJson(FILES.tz, []);
+
+    // Проверка на дубль названия
+    const duplicate = allTz.find((t) => t.title.toLowerCase() === title.toLowerCase());
+    if (duplicate) return res.status(400).json({ message: `ТЗ с таким названием уже существует: ${duplicate.tz_code}.` });
+
     const tzCode = generateTzCode(allTz, system);
     const users = await readJson(FILES.users, {});
     const creatorName = users[pin]?.fullName || pin;
@@ -1293,6 +1317,8 @@ app.put('/api/tz/:id', async (req, res) => {
     if (req.body.title !== undefined) {
       const t = clip(String(req.body.title).trim(), 300);
       if (t.length < 3) return res.status(400).json({ message: 'Название ТЗ минимум 3 символа.' });
+      const duplicate = allTz.find((x) => x.id !== id && x.title.toLowerCase() === t.toLowerCase());
+      if (duplicate) return res.status(400).json({ message: `ТЗ с таким названием уже существует: ${duplicate.tz_code}.` });
     }
     if (req.body.system !== undefined && !TZ_SYSTEMS.includes(req.body.system))
       return res.status(400).json({ message: 'Выберите систему.' });
@@ -1407,6 +1433,155 @@ app.post('/api/admin/tz-stats', async (req, res) => {
   }
 
   return res.json(stats);
+});
+
+/* ── TZ Excel export ── */
+
+app.post('/api/admin/tz-export', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const allTz = await readJson(FILES.tz, []);
+
+  // Apply same filters as /api/admin/tz
+  const fSystem = String(req.body.system || '').trim();
+  const fStatus = String(req.body.status || '').trim();
+  const fType = String(req.body.type || '').trim();
+  const fPriority = String(req.body.priority || '').trim();
+  const fSearch = String(req.body.search || '').trim().toLowerCase();
+  const fOverdue = !!req.body.overdue;
+  const fNoDates = !!req.body.no_dates;
+  const fNoOwner = !!req.body.no_owner;
+  const fDeadlineSoon = !!req.body.deadline_soon;
+
+  let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+
+  if (fSystem) items = items.filter((t) => t.system === fSystem);
+  if (fStatus) items = items.filter((t) => t.status === fStatus);
+  if (fType) items = items.filter((t) => t.type === fType);
+  if (fPriority) items = items.filter((t) => t.priority === fPriority);
+  if (fSearch) items = items.filter((t) =>
+    (t.title && t.title.toLowerCase().includes(fSearch)) ||
+    (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
+    (t.owner && t.owner.toLowerCase().includes(fSearch)) ||
+    (t.description && t.description.toLowerCase().includes(fSearch))
+  );
+  if (fOverdue) items = items.filter((t) => t.flags.overdue);
+  if (fNoDates) items = items.filter((t) => t.flags.no_dates);
+  if (fNoOwner) items = items.filter((t) => t.flags.no_owner);
+  if (fDeadlineSoon) items = items.filter((t) => t.flags.deadline_soon);
+
+  items.sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  const prioLabels = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
+
+  const wb = new ExcelJS.Workbook();
+  const ws = wb.addWorksheet('ТЗ');
+
+  ws.columns = [
+    { header: 'Код', key: 'tz_code', width: 18 },
+    { header: 'Название', key: 'title', width: 40 },
+    { header: 'Система', key: 'system', width: 14 },
+    { header: 'Тип', key: 'type', width: 12 },
+    { header: 'Приоритет', key: 'priority', width: 14 },
+    { header: 'Статус', key: 'status', width: 18 },
+    { header: 'Ответственный', key: 'owner', width: 22 },
+    { header: 'Описание', key: 'description', width: 50 },
+    { header: 'Confluence', key: 'link_confluence', width: 30 },
+    { header: 'Jira', key: 'link_jira', width: 30 },
+    { header: 'Дедлайн анализа', key: 'date_analysis_deadline', width: 16 },
+    { header: 'Дедлайн разработки', key: 'date_dev_deadline', width: 18 },
+    { header: 'Дедлайн релиза', key: 'date_release_deadline', width: 16 },
+    { header: 'Дата создания', key: 'created_at', width: 20 }
+  ];
+
+  // Style header row
+  ws.getRow(1).font = { bold: true };
+  ws.getRow(1).fill = { type: 'pattern', pattern: 'solid', fgColor: { argb: 'FF0E2156' } };
+  ws.getRow(1).font = { bold: true, color: { argb: 'FFFFFFFF' } };
+
+  for (const tz of items) {
+    ws.addRow({
+      tz_code: tz.tz_code || '',
+      title: tz.title || '',
+      system: tz.system || '',
+      type: tz.type || '',
+      priority: prioLabels[tz.priority] || tz.priority || '',
+      status: TZ_STATUS_LABELS[tz.status] || tz.status || '',
+      owner: tz.owner || '',
+      description: tz.description || '',
+      link_confluence: tz.link_confluence || '',
+      link_jira: tz.link_jira || '',
+      date_analysis_deadline: tz.date_analysis_deadline || '',
+      date_dev_deadline: tz.date_dev_deadline || '',
+      date_release_deadline: tz.date_release_deadline || '',
+      created_at: tz.created_at ? new Date(tz.created_at).toLocaleString('ru-RU') : ''
+    });
+  }
+
+  const buffer = await wb.xlsx.writeBuffer();
+  const dateStr = new Date().toISOString().slice(0, 10);
+  res.set('Content-Type', 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
+  res.set('Content-Disposition', `attachment; filename="tz_export_${dateStr}.xlsx"`);
+  res.send(Buffer.from(buffer));
+});
+
+/* ── AI Agent endpoints (superadmin only) ── */
+
+app.post('/api/admin/ai-task', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const prompt = String(req.body.prompt || '').trim();
+  if (prompt.length < 3) return res.status(400).json({ message: 'Промпт минимум 3 символа.' });
+
+  const users = await readJson(FILES.users, {});
+  const user = users[pin];
+
+  return withLock(FILES.aiTasks, async () => {
+    const tasks = await readJson(FILES.aiTasks, []);
+    const task = {
+      id: randomUUID(),
+      prompt: prompt.slice(0, 4000),
+      status: 'pending',
+      result: null,
+      created_by: user ? user.fullName : 'superadmin',
+      created_at: new Date().toISOString(),
+      started_at: null,
+      finished_at: null
+    };
+    tasks.push(task);
+    await writeJson(FILES.aiTasks, tasks);
+    return res.json(task);
+  });
+});
+
+app.post('/api/admin/ai-tasks', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const tasks = await readJson(FILES.aiTasks, []);
+  const sorted = tasks.sort((a, b) => b.created_at.localeCompare(a.created_at)).slice(0, 50);
+  return res.json(sorted);
+});
+
+app.post('/api/admin/ai-task-cancel', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await isSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const taskId = String(req.body.taskId || '').trim();
+  if (!taskId) return res.status(400).json({ message: 'Укажите taskId.' });
+
+  return withLock(FILES.aiTasks, async () => {
+    const tasks = await readJson(FILES.aiTasks, []);
+    const task = tasks.find((t) => t.id === taskId);
+    if (!task) return res.status(404).json({ message: 'Задача не найдена.' });
+    if (task.status !== 'pending') return res.status(400).json({ message: 'Можно отменить только pending-задачу.' });
+    task.status = 'cancelled';
+    task.finished_at = new Date().toISOString();
+    await writeJson(FILES.aiTasks, tasks);
+    return res.json({ ok: true });
+  });
 });
 
 /* ── SPA fallback ── */
