@@ -377,26 +377,29 @@ const TZ_TRANSITIONS = {
   cancelled: ['draft']
 };
 
+const TZ_STATUS_ORD = { draft: 0, review: 1, analysis: 2, development: 3, testing: 4, release: 5, production: 6, cancelled: 99 };
+
 function computeTzFlags(tz) {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const flags = {};
+  const ord = TZ_STATUS_ORD[tz.status] ?? 0;
 
-  // Просрочка анализа
-  flags.analysis_overdue = tz.status === 'analysis' && tz.date_analysis_deadline && today > tz.date_analysis_deadline;
-  // Просрочка разработки
-  flags.dev_overdue = tz.status === 'development' && tz.date_dev_deadline && today > tz.date_dev_deadline;
-  // Просрочка релиза
-  flags.release_overdue = tz.status === 'release' && tz.date_release_deadline && today > tz.date_release_deadline;
-  // Общая просрочка (любой deadline пройден и статус не финальный)
+  // Дедлайн означает «фаза должна быть ЗАВЕРШЕНА к дате» → ТЗ должно продвинуться дальше
+  // date_analysis_deadline → ТЗ должно быть ≥ development (ord ≥ 3)
+  // date_dev_deadline      → ТЗ должно быть ≥ testing     (ord ≥ 4)
+  // date_release_deadline  → ТЗ должно быть ≥ production   (ord ≥ 6)
+  flags.analysis_overdue = !!tz.date_analysis_deadline && today > tz.date_analysis_deadline && ord < 3;
+  flags.dev_overdue = !!tz.date_dev_deadline && today > tz.date_dev_deadline && ord < 4;
+  flags.release_overdue = !!tz.date_release_deadline && today > tz.date_release_deadline && ord < 6;
   flags.overdue = flags.analysis_overdue || flags.dev_overdue || flags.release_overdue;
 
-  // Скоро дедлайн (в пределах 7 дней)
+  // Скоро дедлайн (в пределах 7 дней) — ближайший непройденный дедлайн
   const soon7 = new Date(now.getTime() + 7 * 86400000).toISOString().slice(0, 10);
   const activeDeadline =
-    (tz.status === 'analysis' && tz.date_analysis_deadline) ||
-    (tz.status === 'development' && tz.date_dev_deadline) ||
-    (tz.status === 'release' && tz.date_release_deadline) ||
+    (ord < 3 && tz.date_analysis_deadline) ||
+    (ord < 4 && tz.date_dev_deadline) ||
+    (ord < 6 && tz.date_release_deadline) ||
     null;
   flags.deadline_soon = !flags.overdue && !!activeDeadline && activeDeadline <= soon7 && activeDeadline >= today;
 
@@ -404,6 +407,13 @@ function computeTzFlags(tz) {
   flags.no_dates = !tz.date_analysis_deadline && !tz.date_dev_deadline && !tz.date_release_deadline;
   // Нет ответственного
   flags.no_owner = !tz.owner || tz.owner.trim() === '';
+
+  // Неполные дедлайны: есть хотя бы один, но для текущей/будущих фаз не все заданы
+  const hasAny = !!tz.date_analysis_deadline || !!tz.date_dev_deadline || !!tz.date_release_deadline;
+  const needAnalysis = ord < 3 && !tz.date_analysis_deadline;
+  const needDev = ord < 4 && !tz.date_dev_deadline;
+  const needRelease = ord < 6 && !tz.date_release_deadline;
+  flags.missing_deadline = hasAny && (needAnalysis || needDev || needRelease);
 
   return flags;
 }
@@ -1236,6 +1246,7 @@ app.post('/api/tz', async (req, res) => {
   const date_analysis_deadline = String(req.body.date_analysis_deadline || '').trim();
   const date_dev_deadline = String(req.body.date_dev_deadline || '').trim();
   const date_release_deadline = String(req.body.date_release_deadline || '').trim();
+  const reqStatus = String(req.body.status || '').trim();
 
   if (!title || title.length < 3) return res.status(400).json({ message: 'Название ТЗ минимум 3 символа.' });
   if (!TZ_SYSTEMS.includes(system)) return res.status(400).json({ message: 'Выберите систему.' });
@@ -1244,6 +1255,16 @@ app.post('/api/tz', async (req, res) => {
   if (date_analysis_deadline && !isValidDate(date_analysis_deadline)) return res.status(400).json({ message: 'Дата анализа: YYYY-MM-DD.' });
   if (date_dev_deadline && !isValidDate(date_dev_deadline)) return res.status(400).json({ message: 'Дата разработки: YYYY-MM-DD.' });
   if (date_release_deadline && !isValidDate(date_release_deadline)) return res.status(400).json({ message: 'Дата релиза: YYYY-MM-DD.' });
+
+  // Валидация статуса при создании: пустой → draft, иначе должен быть допустимым переходом из draft
+  let initialStatus = 'draft';
+  if (reqStatus && reqStatus !== 'draft') {
+    const allowed = TZ_TRANSITIONS.draft || [];
+    if (!allowed.includes(reqStatus)) {
+      return res.status(400).json({ message: `Переход из «${TZ_STATUS_LABELS.draft}» в «${TZ_STATUS_LABELS[reqStatus] || reqStatus}» не допускается.` });
+    }
+    initialStatus = reqStatus;
+  }
 
   return withLock(FILES.tz, async () => {
     const allTz = await readJson(FILES.tz, []);
@@ -1263,7 +1284,7 @@ app.post('/api/tz', async (req, res) => {
       system,
       type,
       priority,
-      status: 'draft',
+      status: initialStatus,
       description,
       owner,
       link_confluence,
@@ -1370,6 +1391,7 @@ app.post('/api/admin/tz', async (req, res) => {
   const fNoDates = !!req.body.no_dates;
   const fNoOwner = !!req.body.no_owner;
   const fDeadlineSoon = !!req.body.deadline_soon;
+  const fMissingDeadline = !!req.body.missing_deadline;
 
   let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
 
@@ -1387,6 +1409,7 @@ app.post('/api/admin/tz', async (req, res) => {
   if (fNoDates) items = items.filter((t) => t.flags.no_dates);
   if (fNoOwner) items = items.filter((t) => t.flags.no_owner);
   if (fDeadlineSoon) items = items.filter((t) => t.flags.deadline_soon);
+  if (fMissingDeadline) items = items.filter((t) => t.flags.missing_deadline);
 
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
   return res.json(items);
@@ -1421,6 +1444,7 @@ app.post('/api/admin/tz-stats', async (req, res) => {
     deadline_soon: withFlags.filter((t) => t.flags.deadline_soon).length,
     no_dates: withFlags.filter((t) => t.flags.no_dates).length,
     no_owner: withFlags.filter((t) => t.flags.no_owner).length,
+    missing_deadline: withFlags.filter((t) => t.flags.missing_deadline).length,
     by_status: {},
     by_system: {}
   };
@@ -1453,6 +1477,7 @@ app.post('/api/admin/tz-export', async (req, res) => {
   const fNoDates = !!req.body.no_dates;
   const fNoOwner = !!req.body.no_owner;
   const fDeadlineSoon = !!req.body.deadline_soon;
+  const fMissingDeadline = !!req.body.missing_deadline;
 
   let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
 
@@ -1470,6 +1495,7 @@ app.post('/api/admin/tz-export', async (req, res) => {
   if (fNoDates) items = items.filter((t) => t.flags.no_dates);
   if (fNoOwner) items = items.filter((t) => t.flags.no_owner);
   if (fDeadlineSoon) items = items.filter((t) => t.flags.deadline_soon);
+  if (fMissingDeadline) items = items.filter((t) => t.flags.missing_deadline);
 
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
 

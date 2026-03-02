@@ -1,0 +1,17 @@
+[Unit]
+Description=LKDS AI Worker (Claude CLI)
+After=network.target
+
+[Service]
+Type=simple
+User=plg
+WorkingDirectory=/home/plg/lkds
+ExecStart=/home/plg/.nvm/versions/node/v20.19.4/bin/node scripts/ai-worker.js
+Restart=always
+RestartSec=10
+Environment=PATH=/home/plg/.nvm/versions/node/v20.19.4/bin:/usr/bin:/bin
+Environment=HOME=/home/plg
+Environment=CLAUDECODE=
+
+[Install]
+WantedBy=multi-user.target

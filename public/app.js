@@ -151,7 +151,7 @@ const state = {
   crmConfig: { modules: [], errorCategories: [] },
   itTicket: { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' },
   tzConfig: null,
-  tzFilters: { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false },
+  tzFilters: { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false, missing_deadline: false },
   tzList: [],
   tzEditId: null
 };
@@ -827,6 +827,7 @@ ticketForm.addEventListener('submit', async (e) => {
 /* ── IT Wizard ── */
 
 function resetItWizard() {
+  if (!itWizard) return;
   state.itTicket = { step: 1, category: null, subcategory: null, location: null, seat: '', description: '', _showAllLocations: false };
   msg(itTicketMessage, '');
   renderItStep();
@@ -1361,7 +1362,7 @@ function itStatusBadge(status) {
 /* ── My IT Tickets ── */
 
 async function loadMyItTickets() {
-  if (!state.pin) return;
+  if (!state.pin || !myItTicketsList) return;
   try {
     const tickets = await api('/api/my-it-tickets', {
       method: 'POST',
@@ -1536,6 +1537,7 @@ function renderTzFilters() {
     <div class="tz-filters-row">
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterOverdue"${f.overdue ? ' checked' : ''} /> Просрочено</label>
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterDeadlineSoon"${f.deadline_soon ? ' checked' : ''} /> Скоро дедлайн</label>
+      <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterMissingDeadline"${f.missing_deadline ? ' checked' : ''} /> Неполные дедлайны</label>
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterNoDates"${f.no_dates ? ' checked' : ''} /> Без дат</label>
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterNoOwner"${f.no_owner ? ' checked' : ''} /> Без ответственного</label>
     </div>`;
@@ -1551,6 +1553,7 @@ function renderTzFilters() {
   bindChange('tzFilterPriority', 'priority');
   bindChange('tzFilterOverdue', 'overdue');
   bindChange('tzFilterDeadlineSoon', 'deadline_soon');
+  bindChange('tzFilterMissingDeadline', 'missing_deadline');
   bindChange('tzFilterNoDates', 'no_dates');
   bindChange('tzFilterNoOwner', 'no_owner');
 
@@ -1604,11 +1607,13 @@ function renderTzStats(stats) {
   if (!tzStatsBar) return;
   const overduePulse = stats.overdue > 0 ? ' tz-stat-pulse' : '';
   const soonPulse = stats.deadline_soon > 0 ? ' tz-stat-pulse' : '';
+  const missingPulse = stats.missing_deadline > 0 ? ' tz-stat-pulse' : '';
   tzStatsBar.innerHTML = `
     <div class="tz-stats-row">
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.total}</div><div class="tz-stat-label">Всего</div></div>
       <div class="tz-stat-card tz-stat-danger${overduePulse}"><div class="tz-stat-num">${stats.overdue}</div><div class="tz-stat-label">Просрочено</div></div>
       <div class="tz-stat-card tz-stat-warn${soonPulse}"><div class="tz-stat-num">${stats.deadline_soon}</div><div class="tz-stat-label">Скоро</div></div>
+      <div class="tz-stat-card tz-stat-info${missingPulse}"><div class="tz-stat-num">${stats.missing_deadline}</div><div class="tz-stat-label">Неполн. дедл.</div></div>
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_dates}</div><div class="tz-stat-label">Без дат</div></div>
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_owner}</div><div class="tz-stat-label">Без ответств.</div></div>
     </div>`;
@@ -1628,6 +1633,7 @@ function renderTzList(items) {
     let rowCls = '';
     if (f.overdue) rowCls = ' class="tz-row-overdue"';
     else if (f.deadline_soon) rowCls = ' class="tz-row-soon"';
+    else if (f.missing_deadline) rowCls = ' class="tz-row-missing-dl"';
 
     const links = [];
     if (tz.link_confluence) links.push(`<a href="${esc(tz.link_confluence)}" target="_blank" rel="noreferrer" class="tz-link-icon" title="Confluence" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></a>`);
@@ -1684,7 +1690,6 @@ function openTzCreateForm() {
   tzPopupTitle.querySelector('span').textContent = 'Новое ТЗ';
   tzSubmitBtn.textContent = 'Создать';
   tzForm.reset();
-  hide(tzStatusRow);
   hide(tzMeta);
   hide(tzHistorySection);
   msg(tzPopupMessage, '');
@@ -1693,6 +1698,14 @@ function openTzCreateForm() {
   $('tzSystem').innerHTML = cfg.systems.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
   $('tzType').innerHTML = cfg.types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
   $('tzPriority').innerHTML = cfg.priorities.map((p) => `<option value="${esc(p)}">${esc(TZ_PRIO_LABELS[p] || p)}</option>`).join('');
+
+  // Status select — draft + допустимые переходы
+  const transitions = cfg.transitions['draft'] || [];
+  const statusOptions = ['draft', ...transitions];
+  $('tzStatus').innerHTML = statusOptions.map((s) =>
+    `<option value="${esc(s)}"${s === 'draft' ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
+  ).join('');
+  show(tzStatusRow);
 
   show(tzPopup);
 }
@@ -1804,8 +1817,8 @@ tzForm.addEventListener('submit', async (e) => {
   };
 
   try {
+    body.status = $('tzStatus').value;
     if (state.tzEditId) {
-      body.status = $('tzStatus').value;
       const result = await api(`/api/tz/${state.tzEditId}`, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },

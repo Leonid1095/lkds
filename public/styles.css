@@ -225,6 +225,7 @@ details[open] summary{margin-bottom:12px}
 .tab:hover{color:var(--text);background:var(--accent-soft)}
 .tab.active{color:var(--accent);border-bottom-color:var(--accent)}
 .tab.tab-disabled{opacity:.45;cursor:default;pointer-events:none}
+a.tab{text-decoration:none}
 .tab-badge{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.5px;background:var(--text-sec);color:var(--bg);padding:1px 5px;border-radius:6px;margin-left:4px;vertical-align:middle}
 
 /* ── Content panels ── */
@@ -842,6 +843,8 @@ button{
 .tz-stat-danger{border-color:#fed7d7;background:var(--danger-soft)}
 .tz-stat-warn .tz-stat-num{color:#d69e2e}
 .tz-stat-warn{border-color:#fefcbf;background:#fffff0}
+.tz-stat-info .tz-stat-num{color:#6b46c1}
+.tz-stat-info{border-color:#d6bcfa;background:#f3e8ff}
 
 .tz-filters{
   display:flex;flex-direction:column;gap:10px;margin-bottom:16px;
@@ -894,6 +897,8 @@ button{
 .tz-row-overdue:hover td{background:#fed7d7!important}
 .tz-row-soon td{background:#fffff0!important}
 .tz-row-soon:hover td{background:#fefcbf!important}
+.tz-row-missing-dl td{background:#f3e8ff!important}
+.tz-row-missing-dl:hover td{background:#d6bcfa!important}
 .tz-code-cell{font-weight:700;white-space:nowrap;color:var(--accent)}
 .tz-cell-overdue{color:var(--danger);font-weight:700}
 .tz-title-cell{max-width:250px;word-wrap:break-word}
