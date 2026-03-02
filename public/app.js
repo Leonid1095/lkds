@@ -1701,11 +1701,11 @@ async function loadTzData() {
   if (!state.pin || state.adminRole !== 'superadmin') return;
   msg(tzMessage, '');
   try {
-    const [items, stats] = await Promise.all([
+    const [resp, stats] = await Promise.all([
       api('/api/admin/tz', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, ...state.tzFilters })
+        body: JSON.stringify({ pin: state.pin, ...state.tzFilters, pageSize: 999 })
       }),
       api('/api/admin/tz-stats', {
         method: 'POST',
@@ -1713,6 +1713,7 @@ async function loadTzData() {
         body: JSON.stringify({ pin: state.pin })
       })
     ]);
+    const items = Array.isArray(resp) ? resp : (resp.items || []);
     state.tzList = items;
     renderTzStats(stats);
     renderTzList(items);
