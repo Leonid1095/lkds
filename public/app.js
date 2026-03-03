@@ -1673,10 +1673,10 @@ function renderTzFilters() {
       <button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
       <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать ТЗ</button>
       <div class="tz-view-toggle">
-        <button class="tz-view-btn${state.tzViewMode === 'list' ? ' active' : ''}" data-view="list" title="Список">
+        <button type="button" class="tz-view-btn${state.tzViewMode === 'list' ? ' active' : ''}" data-view="list" title="Список">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </button>
-        <button class="tz-view-btn${state.tzViewMode === 'kanban' ? ' active' : ''}" data-view="kanban" title="Канбан">
+        <button type="button" class="tz-view-btn${state.tzViewMode === 'kanban' ? ' active' : ''}" data-view="kanban" title="Канбан">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg>
         </button>
       </div>
