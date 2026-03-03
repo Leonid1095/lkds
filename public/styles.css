@@ -727,8 +727,11 @@ button{
   .tz-table{font-size:12px}
   .tz-table th,.tz-table td{padding:6px 8px}
   .tz-popup-card{max-width:100%}
-  .kanban-column{min-width:170px;max-width:220px;flex:1 0 170px}
+  .kanban-column{min-width:160px;max-width:220px;flex:1 0 160px}
   .kanban-cards{max-height:calc(100vh - 380px)}
+  .kanban-card-body{padding:8px 10px}
+  .kanban-card-title{font-size:12px}
+  .kanban-col-title{font-size:12px}
   .kb-categories-grid{grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px}
   .kb-editor-popup-card{max-width:100%}
   .kb-editor-grid{grid-template-columns:1fr}
@@ -834,9 +837,17 @@ button{
   .tz-table{font-size:11px}
   .tz-table th,.tz-table td{padding:5px 6px}
   .tz-popup-card{border-radius:16px 16px 0 0;max-width:100%}
-  .kanban-column{min-width:150px;max-width:180px;flex:1 0 150px}
-  .kanban-card-title{font-size:12px;-webkit-line-clamp:2}
-  .kanban-cards{max-height:calc(100vh - 400px);padding:6px}
+  .kanban-board{gap:8px;padding:4px 0 12px}
+  .kanban-column{min-width:140px;max-width:170px;flex:1 0 140px}
+  .kanban-column-header{padding:8px 10px}
+  .kanban-col-title{font-size:11px}
+  .kanban-col-count{font-size:10px;padding:1px 6px}
+  .kanban-card-body{padding:7px 8px}
+  .kanban-card-code{font-size:10px;margin-bottom:2px}
+  .kanban-card-title{font-size:11px;-webkit-line-clamp:2}
+  .kanban-card-owner{font-size:10px;margin-top:4px}
+  .kanban-flag{font-size:9px;padding:1px 4px;margin-top:4px}
+  .kanban-cards{max-height:calc(100vh - 360px);padding:6px;gap:6px}
   .kb-categories-grid{grid-template-columns:1fr 1fr;gap:8px}
   .kb-category-card{padding:14px 10px}
   .kb-cat-icon svg{width:24px;height:24px}
@@ -1096,6 +1107,11 @@ button{
 .ai-input-row textarea:focus{outline:none;border-color:var(--accent)}
 .ai-input-row .btn-primary{min-height:44px;white-space:nowrap}
 
+/* ── Kanban full-width mode ── */
+#panelTz.kanban-active{max-width:100%}
+#panelTz.kanban-active .card{max-width:100%}
+.content:has(#panelTz.kanban-active.active){max-width:100%}
+
 /* ── TZ View toggle ── */
 .tz-view-toggle{display:flex;gap:2px;margin-left:auto;background:var(--border);border-radius:8px;padding:2px}
 .tz-view-btn{
@@ -1107,13 +1123,14 @@ button{
 
 /* ── Kanban ── */
 .kanban-board{
-  display:flex;gap:12px;overflow-x:auto;padding:8px 0 16px;
-  -webkit-overflow-scrolling:touch;
+  display:flex;gap:10px;overflow-x:auto;padding:8px 0 16px;
+  -webkit-overflow-scrolling:touch;scroll-snap-type:x proximity;
 }
 .kanban-column{
-  min-width:200px;max-width:260px;flex:1 0 200px;
+  min-width:180px;max-width:280px;flex:1 0 180px;
   background:#f7f9fc;border-radius:12px;display:flex;flex-direction:column;
   border:2px solid transparent;transition:border-color .2s,opacity .2s;
+  scroll-snap-align:start;
 }
 .kanban-column.drag-over{border-color:var(--accent);background:#e8f4fd}
 .kanban-column.drag-forbidden{opacity:.4}

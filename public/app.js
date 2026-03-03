@@ -1725,6 +1725,9 @@ function renderTzFilters() {
       state.tzViewMode = btn.dataset.view;
       document.querySelectorAll('.tz-view-btn').forEach((b) => b.classList.remove('active'));
       btn.classList.add('active');
+      const panel = document.getElementById('panelTz');
+      if (btn.dataset.view === 'kanban') panel.classList.add('kanban-active');
+      else panel.classList.remove('kanban-active');
       loadTzData();
     });
   });
