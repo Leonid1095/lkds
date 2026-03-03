@@ -328,7 +328,7 @@ app.use((req, res, next) => {
 /* ── Helpers ── */
 
 app.use(express.json({ limit: '1mb' }));
-app.use(express.static(publicDir));
+app.use(express.static(publicDir, { etag: false, maxAge: 0 }));
 
 async function readJson(filePath, fallback) {
   try {
