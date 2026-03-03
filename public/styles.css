@@ -1184,6 +1184,14 @@ button{
 .kb-search-input:focus{outline:none;border-color:var(--accent)}
 
 .kb-empty{color:var(--text-sec);text-align:center;padding:40px 0;font-size:15px}
+.kb-empty-state{text-align:center;padding:40px 0}
+.kb-empty-state .btn-primary{margin-top:16px}
+.btn-kb-manage{
+  background:var(--accent);color:#fff;border:none;padding:7px 16px;font-size:13px;
+  border-radius:8px;cursor:pointer;display:inline-flex;align-items:center;gap:6px;
+  font-weight:500;transition:all .2s;
+}
+.btn-kb-manage:hover{background:var(--primary)}
 
 /* Categories grid */
 .kb-categories-grid{
