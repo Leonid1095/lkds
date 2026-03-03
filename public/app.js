@@ -2439,7 +2439,7 @@ async function renderKbArticle() {
     kbContent.innerHTML = `<article class="kb-article-reader">
       <h1 class="kb-article-title">${esc(article.title)}</h1>
       <div class="kb-article-meta">${esc(article.created_by)} &middot; ${fmtDate(article.updated_at)}</div>
-      <div class="kb-article-body">${article.content}</div>
+      <div class="kb-article-body">${typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen'] }) : esc(article.content)}</div>
     </article>`;
 
     if (isSuperadmin) {
@@ -2544,7 +2544,7 @@ async function openKbEditor(article) {
     const q = initQuill();
     if (q) {
       if (article && article.content) {
-        q.root.innerHTML = article.content;
+        q.root.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content) : article.content;
       } else {
         q.root.innerHTML = '';
       }

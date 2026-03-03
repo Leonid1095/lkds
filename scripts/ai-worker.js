@@ -15,6 +15,10 @@ const TASK_TIMEOUT = 300000;
 
 /* ── Telegram helpers ── */
 
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
+
 async function sendTelegram(chatId, text) {
   const token = process.env.TG_BOT_TOKEN;
   if (!token || !chatId) return;
@@ -76,7 +80,7 @@ async function sendTzDigest() {
       const deadline = t.flags.analysis_overdue ? `анализ до ${t.date_analysis_deadline}`
         : t.flags.dev_overdue ? `разработка до ${t.date_dev_deadline}`
         : `релиз до ${t.date_release_deadline}`;
-      text += `  • <code>${t.tz_code}</code> «${t.title}» — ${deadline} | owner: ${t.owner || '—'}\n`;
+      text += `  • <code>${escHtml(t.tz_code)}</code> «${escHtml(t.title)}» — ${deadline} | owner: ${escHtml(t.owner || '—')}\n`;
     }
   }
 
@@ -85,7 +89,7 @@ async function sendTzDigest() {
     for (const t of soon.slice(0, 5)) {
       const deadline = (t.flags.analysis_overdue === false && t.date_analysis_deadline) ? t.date_analysis_deadline
         : t.date_dev_deadline || t.date_release_deadline || '';
-      text += `  • <code>${t.tz_code}</code> «${t.title}» — до ${deadline}\n`;
+      text += `  • <code>${escHtml(t.tz_code)}</code> «${escHtml(t.title)}» — до ${deadline}\n`;
     }
   }
 
@@ -93,7 +97,7 @@ async function sendTzDigest() {
     text += `\n🟣 <b>Неполный дедлайн: ${missing.length}</b>\n`;
     for (const t of missing.slice(0, 3)) {
       const phase = TZ_STATUS_LABELS[t.status] || t.status;
-      text += `  • <code>${t.tz_code}</code> «${t.title}» — в ${phase.toLowerCase()}, нет дедлайна\n`;
+      text += `  • <code>${escHtml(t.tz_code)}</code> «${escHtml(t.title)}» — в ${phase.toLowerCase()}, нет дедлайна\n`;
     }
   }
 

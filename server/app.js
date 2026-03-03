@@ -81,7 +81,22 @@ const registerLimiter = rateLimit({
   legacyHeaders: false
 });
 
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function validateId(req, res, next) {
+  if (req.params.id && !UUID_RE.test(req.params.id)) {
+    return res.status(400).json({ message: 'Некорректный ID.' });
+  }
+  next();
+}
+
+app.param('id', validateId);
+
 /* ── Telegram notifications ── */
+
+function escHtml(s) {
+  return String(s).replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+}
 
 const TG_TOKEN = process.env.TG_BOT_TOKEN || '';
 const TG_ADMIN_IDS = (process.env.TG_ADMIN_IDS || '')
@@ -544,7 +559,7 @@ app.post('/api/auth/forgot-pin', loginLimiter, async (req, res) => {
   await writeJson(FILES.pinRequests, requests);
 
   tgNotifyAdmins(
-    `🔑 <b>Забыл пин-код</b>\n\nФИО: ${fullName}\nКонтакт: ${contact}`
+    `🔑 <b>Забыл пин-код</b>\n\nФИО: ${escHtml(fullName)}\nКонтакт: ${escHtml(contact)}`
   );
 
   return res.json({ message: 'Запрос отправлен администратору. Ожидайте — с вами свяжутся.' });
@@ -784,12 +799,12 @@ app.post('/api/tickets', async (req, res) => {
     if (tid !== null) {
       // Format matching bot.py _ticket_text()
       const tgLines = [
-        `${botEmoji} <b>Новая заявка #${tid}: ${botType}</b>\n`,
-        `👤 ${user.fullName}`,
-        `📦 ${module}`
+        `${botEmoji} <b>Новая заявка #${tid}: ${escHtml(botType)}</b>\n`,
+        `👤 ${escHtml(user.fullName)}`,
+        `📦 ${escHtml(module)}`
       ];
-      if (botCategory && botCategory !== '—') tgLines.push(`📂 ${botCategory}`);
-      tgLines.push(`💬 ${description}`);
+      if (botCategory && botCategory !== '—') tgLines.push(`📂 ${escHtml(botCategory)}`);
+      tgLines.push(`💬 ${escHtml(description)}`);
       const tgText = tgLines.join('\n');
 
       const adminMessages = {};
@@ -893,11 +908,11 @@ app.post('/api/it-tickets', async (req, res) => {
 
   tgNotifyItAdmins(
     `🔧 <b>ИТ-заявка</b>\n` +
-    `Категория: ${cat.emoji} ${cat.label}\n` +
-    (category !== 'other' && subcategory ? `Тип: ${subcategory}\n` : '') +
-    `Локация: ${location}${location === 'Офис 2 этаж' && seat ? ` (место ${seat})` : ''}\n` +
-    `Описание: ${ticket.description}\n` +
-    `От: ${user.fullName} (${user.contact})\n\n` +
+    `Категория: ${cat.emoji} ${escHtml(cat.label)}\n` +
+    (category !== 'other' && subcategory ? `Тип: ${escHtml(subcategory)}\n` : '') +
+    `Локация: ${escHtml(location)}${location === 'Офис 2 этаж' && seat ? ` (место ${escHtml(seat)})` : ''}\n` +
+    `Описание: ${escHtml(ticket.description)}\n` +
+    `От: ${escHtml(user.fullName)} (${escHtml(user.contact)})\n\n` +
     `🔗 <a href="${publicBaseUrl}/it-status/${ticket.id}">Взять / Обновить статус</a>`
   );
 
@@ -1499,23 +1514,17 @@ app.put('/api/tz/:id', async (req, res) => {
   });
 });
 
-app.post('/api/admin/tz', async (req, res) => {
-  const pin = String(req.body.pin || '').trim();
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-
-  const allTz = await readJson(FILES.tz, []);
-
-  // Filters
-  const fSystem = String(req.body.system || '').trim();
-  const fStatus = String(req.body.status || '').trim();
-  const fType = String(req.body.type || '').trim();
-  const fPriority = String(req.body.priority || '').trim();
-  const fSearch = String(req.body.search || '').trim().toLowerCase();
-  const fOverdue = !!req.body.overdue;
-  const fNoDates = !!req.body.no_dates;
-  const fNoOwner = !!req.body.no_owner;
-  const fDeadlineSoon = !!req.body.deadline_soon;
-  const fMissingDeadline = !!req.body.missing_deadline;
+function filterTz(allTz, body) {
+  const fSystem = String(body.system || '').trim();
+  const fStatus = String(body.status || '').trim();
+  const fType = String(body.type || '').trim();
+  const fPriority = String(body.priority || '').trim();
+  const fSearch = String(body.search || '').trim().toLowerCase();
+  const fOverdue = !!body.overdue;
+  const fNoDates = !!body.no_dates;
+  const fNoOwner = !!body.no_owner;
+  const fDeadlineSoon = !!body.deadline_soon;
+  const fMissingDeadline = !!body.missing_deadline;
 
   let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
 
@@ -1535,6 +1544,15 @@ app.post('/api/admin/tz', async (req, res) => {
   if (fDeadlineSoon) items = items.filter((t) => t.flags.deadline_soon);
   if (fMissingDeadline) items = items.filter((t) => t.flags.missing_deadline);
 
+  return items;
+}
+
+app.post('/api/admin/tz', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const allTz = await readJson(FILES.tz, []);
+  const items = filterTz(allTz, req.body);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
   const { page, pageSize } = req.body;
   return res.json(paginate(items, page, pageSize));
@@ -1591,37 +1609,7 @@ app.post('/api/admin/tz-export', async (req, res) => {
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
-
-  // Apply same filters as /api/admin/tz
-  const fSystem = String(req.body.system || '').trim();
-  const fStatus = String(req.body.status || '').trim();
-  const fType = String(req.body.type || '').trim();
-  const fPriority = String(req.body.priority || '').trim();
-  const fSearch = String(req.body.search || '').trim().toLowerCase();
-  const fOverdue = !!req.body.overdue;
-  const fNoDates = !!req.body.no_dates;
-  const fNoOwner = !!req.body.no_owner;
-  const fDeadlineSoon = !!req.body.deadline_soon;
-  const fMissingDeadline = !!req.body.missing_deadline;
-
-  let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
-
-  if (fSystem) items = items.filter((t) => t.system === fSystem);
-  if (fStatus) items = items.filter((t) => t.status === fStatus);
-  if (fType) items = items.filter((t) => t.type === fType);
-  if (fPriority) items = items.filter((t) => t.priority === fPriority);
-  if (fSearch) items = items.filter((t) =>
-    (t.title && t.title.toLowerCase().includes(fSearch)) ||
-    (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
-    (t.owner && t.owner.toLowerCase().includes(fSearch)) ||
-    (t.description && t.description.toLowerCase().includes(fSearch))
-  );
-  if (fOverdue) items = items.filter((t) => t.flags.overdue);
-  if (fNoDates) items = items.filter((t) => t.flags.no_dates);
-  if (fNoOwner) items = items.filter((t) => t.flags.no_owner);
-  if (fDeadlineSoon) items = items.filter((t) => t.flags.deadline_soon);
-  if (fMissingDeadline) items = items.filter((t) => t.flags.missing_deadline);
-
+  const items = filterTz(allTz, req.body);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   const prioLabels = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
@@ -1684,22 +1672,7 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
-
-  const fSystem = String(req.body.system || '').trim();
-  const fType = String(req.body.type || '').trim();
-  const fPriority = String(req.body.priority || '').trim();
-  const fSearch = String(req.body.search || '').trim().toLowerCase();
-
-  let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
-
-  if (fSystem) items = items.filter((t) => t.system === fSystem);
-  if (fType) items = items.filter((t) => t.type === fType);
-  if (fPriority) items = items.filter((t) => t.priority === fPriority);
-  if (fSearch) items = items.filter((t) =>
-    (t.title && t.title.toLowerCase().includes(fSearch)) ||
-    (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
-    (t.owner && t.owner.toLowerCase().includes(fSearch))
-  );
+  const items = filterTz(allTz, req.body);
 
   items.sort((a, b) => {
     const pa = { critical: 0, high: 1, medium: 2, low: 3 };
