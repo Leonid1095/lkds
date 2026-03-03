@@ -113,6 +113,28 @@ const tzMeta = $('tzMeta');
 const tzHistorySection = $('tzHistorySection');
 const tzHistoryList = $('tzHistoryList');
 
+/* ── KB (Wiki) DOM ── */
+const tabKb = $('tabKb');
+const kbBreadcrumbs = $('kbBreadcrumbs');
+const kbToolbar = $('kbToolbar');
+const kbContent = $('kbContent');
+const kbMessage = $('kbMessage');
+const kbEditorPopup = $('kbEditorPopup');
+const kbEditorForm = $('kbEditorForm');
+const kbEditorTitle = $('kbEditorTitle');
+const kbEditorTitleInput = $('kbEditorTitleInput');
+const kbEditorCategory = $('kbEditorCategory');
+const kbEditorPinned = $('kbEditorPinned');
+const kbEditorSubmitBtn = $('kbEditorSubmitBtn');
+const kbEditorCancelBtn = $('kbEditorCancelBtn');
+const kbEditorMessage = $('kbEditorMessage');
+const kbCategoriesPopup = $('kbCategoriesPopup');
+const kbCategoriesList = $('kbCategoriesList');
+const kbCatNameInput = $('kbCatNameInput');
+const kbCatAddBtn = $('kbCatAddBtn');
+const kbCategoriesCloseBtn = $('kbCategoriesCloseBtn');
+const kbCategoriesMessage = $('kbCategoriesMessage');
+
 /* ── AI DOM ── */
 const tabAi = $('tabAi');
 const aiChat = $('aiChat');
@@ -154,6 +176,13 @@ const state = {
   tzFilters: { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false, missing_deadline: false },
   tzList: [],
   tzEditId: null,
+  tzViewMode: 'list', // 'list' | 'kanban'
+  kbView: 'categories', // 'categories' | 'articles' | 'article'
+  kbCategories: [],
+  kbCategoryId: null,
+  kbArticleId: null,
+  kbEditId: null,
+  kbQuill: null,
   adminPage: {} // { [type]: currentPage }
 };
 
@@ -202,6 +231,7 @@ document.querySelectorAll('.tab').forEach((tab) => {
     const panelName = tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1);
     $('panel' + panelName).classList.add('active');
     if (tab.dataset.tab === 'tz') loadTzData();
+    if (tab.dataset.tab === 'kb') loadKbView();
     if (tab.dataset.tab === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
   });
 });
@@ -245,6 +275,7 @@ function showMain() {
   }
   tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+  tabKb.style.display = state.pin ? '' : 'none';
   updateTzBadge();
 }
 
@@ -1109,7 +1140,7 @@ adminBtn.addEventListener('click', () => {
 
   // Filter admin tabs by role
   const allAdminTabs = document.querySelectorAll('.admin-tab');
-  const superOnly = ['bookings', 'tickets', 'suggestions', 'users', 'pin-requests'];
+  const superOnly = ['bookings', 'tickets', 'suggestions', 'users', 'pin-requests', 'crm-config'];
   allAdminTabs.forEach((tab) => {
     if (state.adminRole === 'it_admin' && superOnly.includes(tab.dataset.atab)) {
       hide(tab);
@@ -1140,6 +1171,7 @@ document.querySelectorAll('.admin-tab').forEach((tab) => {
 const ADMIN_PAGE_SIZE = 50;
 
 async function loadAdminData(type, page) {
+  if (type === 'crm-config') { await loadCrmConfigAdmin(); return; }
   if (page !== undefined) state.adminPage[type] = page;
   const currentPage = state.adminPage[type] || 1;
   try {
@@ -1152,6 +1184,75 @@ async function loadAdminData(type, page) {
   } catch (err) {
     adminContent.innerHTML = `<p class="message error">${esc(err.message)}</p>`;
   }
+}
+
+async function loadCrmConfigAdmin() {
+  try {
+    const cfg = await api('/api/admin/crm-config', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
+    renderCrmConfigAdmin(cfg);
+  } catch (err) {
+    adminContent.innerHTML = `<p class="message error">${esc(err.message)}</p>`;
+  }
+}
+
+function renderCrmConfigAdmin(cfg) {
+  const renderList = (field, label, items) => `
+    <div class="crm-cfg-section">
+      <h4 class="crm-cfg-title">${label}</h4>
+      <ul class="crm-cfg-list">
+        ${items.map((v) => `
+          <li class="crm-cfg-item">
+            <span>${esc(v)}</span>
+            <button class="btn-cancel-sm" data-crm-field="${field}" data-crm-value="${esc(v)}" data-action="crm-delete">Удалить</button>
+          </li>`).join('')}
+      </ul>
+      <form class="crm-cfg-add-form" data-crm-field="${field}">
+        <input type="text" class="crm-cfg-input" placeholder="Новый пункт..." maxlength="200" required />
+        <button type="submit" class="btn-primary btn-sm">Добавить</button>
+      </form>
+    </div>`;
+
+  adminContent.innerHTML = `
+    <div class="crm-cfg-wrap">
+      ${renderList('modules', 'Модули', cfg.modules)}
+      ${renderList('errorCategories', 'Категории ошибок', cfg.errorCategories)}
+    </div>`;
+
+  adminContent.querySelectorAll('[data-action="crm-delete"]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      if (!confirm(`Удалить «${btn.dataset.crmValue}»?`)) return;
+      try {
+        await api('/api/admin/crm-config-delete', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, field: btn.dataset.crmField, value: btn.dataset.crmValue })
+        });
+        await loadCrmConfigAdmin();
+      } catch (err) { adminMsg(err.message); }
+    });
+  });
+
+  adminContent.querySelectorAll('.crm-cfg-add-form').forEach((form) => {
+    form.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const input = form.querySelector('input');
+      const value = input.value.trim();
+      if (!value) return;
+      try {
+        await api('/api/admin/crm-config-add', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, field: form.dataset.crmField, value })
+        });
+        input.value = '';
+        await loadCrmConfigAdmin();
+      } catch (err) { adminMsg(err.message); }
+    });
+  });
 }
 
 function renderPagination(type, page, pageSize, total) {
@@ -1571,6 +1672,14 @@ function renderTzFilters() {
       <input class="tz-filter-search" id="tzFilterSearch" placeholder="Поиск..." value="${esc(f.search)}" />
       <button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
       <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать ТЗ</button>
+      <div class="tz-view-toggle">
+        <button class="tz-view-btn${state.tzViewMode === 'list' ? ' active' : ''}" data-view="list" title="Список">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
+        </button>
+        <button class="tz-view-btn${state.tzViewMode === 'kanban' ? ' active' : ''}" data-view="kanban" title="Канбан">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg>
+        </button>
+      </div>
     </div>
     <div class="tz-filters-row">
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterOverdue"${f.overdue ? ' checked' : ''} /> Просрочено</label>
@@ -1609,6 +1718,16 @@ function renderTzFilters() {
 
   const exportBtn = document.getElementById('tzExportBtn');
   if (exportBtn) exportBtn.addEventListener('click', exportTzExcel);
+
+  // View toggle
+  document.querySelectorAll('.tz-view-btn').forEach((btn) => {
+    btn.addEventListener('click', () => {
+      state.tzViewMode = btn.dataset.view;
+      document.querySelectorAll('.tz-view-btn').forEach((b) => b.classList.remove('active'));
+      btn.classList.add('active');
+      loadTzData();
+    });
+  });
 }
 
 async function exportTzExcel() {
@@ -1701,23 +1820,41 @@ async function loadTzData() {
   if (!state.pin || state.adminRole !== 'superadmin') return;
   msg(tzMessage, '');
   try {
-    const [resp, stats] = await Promise.all([
-      api('/api/admin/tz', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, ...state.tzFilters, pageSize: 999 })
-      }),
-      api('/api/admin/tz-stats', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin })
-      })
-    ]);
-    const items = Array.isArray(resp) ? resp : (resp.items || []);
-    state.tzList = items;
-    renderTzStats(stats);
-    renderTzList(items);
-    updateTzBadge();
+    if (state.tzViewMode === 'kanban') {
+      const [kanban, stats] = await Promise.all([
+        api('/api/admin/tz-kanban', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, system: state.tzFilters.system, type: state.tzFilters.type, priority: state.tzFilters.priority, search: state.tzFilters.search })
+        }),
+        api('/api/admin/tz-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin })
+        })
+      ]);
+      renderTzStats(stats);
+      renderKanban(kanban);
+      updateTzBadge();
+    } else {
+      const [resp, stats] = await Promise.all([
+        api('/api/admin/tz', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, ...state.tzFilters, pageSize: 999 })
+        }),
+        api('/api/admin/tz-stats', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin })
+        })
+      ]);
+      const items = Array.isArray(resp) ? resp : (resp.items || []);
+      state.tzList = items;
+      renderTzStats(stats);
+      renderTzList(items);
+      updateTzBadge();
+    }
   } catch (err) {
     msg(tzMessage, err.message, 'error');
   }
@@ -1968,6 +2105,553 @@ async function loadItStatus(ticketId) {
     card.innerHTML = `<h2>🔧 ИТ-заявка</h2><p class="it-status-msg error">${esc(err.message)}</p>`;
   }
 }
+
+/* ── Kanban view ── */
+
+const KANBAN_STATUS_COLORS = {
+  draft: '#edf2f7', review: '#fefcbf', analysis: '#bee3f8', development: '#c3dafe',
+  testing: '#e9d8fd', release: '#feebc8', production: '#c6f6d5', cancelled: '#fed7d7'
+};
+
+const KANBAN_DISPLAY_ORDER = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
+
+function renderKanban(data) {
+  if (!tzListContainer) return;
+  const { columns, transitions, statusLabels } = data;
+
+  let html = '<div class="kanban-board">';
+  for (const status of KANBAN_DISPLAY_ORDER) {
+    const cards = columns[status] || [];
+    const color = KANBAN_STATUS_COLORS[status] || '#edf2f7';
+    const allowed = transitions[status] || [];
+
+    html += `<div class="kanban-column" data-status="${esc(status)}" data-allowed="${esc(JSON.stringify(allowed))}">
+      <div class="kanban-column-header" style="background:${color}">
+        <span class="kanban-col-title">${esc(statusLabels[status] || status)}</span>
+        <span class="kanban-col-count">${cards.length}</span>
+      </div>
+      <div class="kanban-cards">`;
+
+    for (const tz of cards) {
+      const f = tz.flags || {};
+      let flagsHtml = '';
+      if (f.overdue) flagsHtml += '<span class="kanban-flag kanban-flag-overdue">Просрочено</span>';
+      else if (f.deadline_soon) flagsHtml += '<span class="kanban-flag kanban-flag-soon">Скоро дедлайн</span>';
+
+      html += `<div class="kanban-card" draggable="true" data-tz-id="${esc(tz.id)}" data-status="${esc(tz.status)}">
+        <div class="kanban-card-prio kanban-prio-${esc(tz.priority)}"></div>
+        <div class="kanban-card-body">
+          <div class="kanban-card-code">${esc(tz.tz_code)}</div>
+          <div class="kanban-card-title">${esc(tz.title)}</div>
+          ${tz.owner ? `<div class="kanban-card-owner">${esc(tz.owner)}</div>` : ''}
+          ${flagsHtml}
+        </div>
+      </div>`;
+    }
+
+    html += '</div></div>';
+  }
+  html += '</div>';
+  tzListContainer.innerHTML = html;
+
+  // Bind drag-and-drop
+  initKanbanDnD();
+
+  // Bind card click
+  tzListContainer.querySelectorAll('.kanban-card').forEach((card) => {
+    card.addEventListener('click', () => openTzDetail(card.dataset.tzId));
+  });
+}
+
+function initKanbanDnD() {
+  let dragTzId = null;
+  let dragFromStatus = null;
+
+  const cards = tzListContainer.querySelectorAll('.kanban-card');
+  const cols = tzListContainer.querySelectorAll('.kanban-column');
+
+  cards.forEach((card) => {
+    card.addEventListener('dragstart', (e) => {
+      dragTzId = card.dataset.tzId;
+      dragFromStatus = card.dataset.status;
+      card.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    card.addEventListener('dragend', () => {
+      card.classList.remove('dragging');
+      cols.forEach((c) => { c.classList.remove('drag-over'); c.classList.remove('drag-forbidden'); });
+      dragTzId = null;
+      dragFromStatus = null;
+    });
+  });
+
+  cols.forEach((col) => {
+    col.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      if (!dragFromStatus) return;
+      const targetStatus = col.dataset.status;
+      if (targetStatus === dragFromStatus) return;
+      const allowed = JSON.parse(col.dataset.allowed || '[]');
+      // Check if transition FROM dragFromStatus TO targetStatus is allowed
+      const fromCol = tzListContainer.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
+      const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
+      if (fromAllowed.includes(targetStatus)) {
+        col.classList.add('drag-over');
+        col.classList.remove('drag-forbidden');
+        e.dataTransfer.dropEffect = 'move';
+      } else {
+        col.classList.add('drag-forbidden');
+        col.classList.remove('drag-over');
+        e.dataTransfer.dropEffect = 'none';
+      }
+    });
+    col.addEventListener('dragleave', () => {
+      col.classList.remove('drag-over');
+      col.classList.remove('drag-forbidden');
+    });
+    col.addEventListener('drop', async (e) => {
+      e.preventDefault();
+      col.classList.remove('drag-over');
+      col.classList.remove('drag-forbidden');
+      if (!dragTzId || !dragFromStatus) return;
+      const targetStatus = col.dataset.status;
+      if (targetStatus === dragFromStatus) return;
+
+      const fromCol = tzListContainer.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
+      const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
+      if (!fromAllowed.includes(targetStatus)) return;
+
+      try {
+        await api(`/api/tz/${dragTzId}/status`, {
+          method: 'PATCH',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, status: targetStatus })
+        });
+        showToast('Статус изменён', 'ok');
+        loadTzData();
+      } catch (err) {
+        showToast(err.message, 'danger');
+      }
+    });
+  });
+}
+
+/* ── Knowledge Base (Wiki) ── */
+
+const KB_ICONS = {
+  folder: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/></svg>',
+  monitor: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="3" width="20" height="14" rx="2" ry="2"/><line x1="8" y1="21" x2="16" y2="21"/><line x1="12" y1="17" x2="12" y2="21"/></svg>',
+  users: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
+  key: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 2l-2 2m-7.61 7.61a5.5 5.5 0 1 1-7.778 7.778 5.5 5.5 0 0 1 7.777-7.777zm0 0L15.5 7.5m0 0l3 3L22 7l-3-3m-3.5 3.5L19 4"/></svg>',
+  book: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>',
+  settings: '<svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>'
+};
+
+function kbIcon(name) {
+  return KB_ICONS[name] || KB_ICONS.folder;
+}
+
+async function loadKbView() {
+  if (!state.pin) return;
+  if (state.kbView === 'categories') await renderKbCategories();
+  else if (state.kbView === 'articles') await renderKbArticles();
+  else if (state.kbView === 'article') await renderKbArticle();
+}
+
+async function renderKbCategories() {
+  msg(kbMessage, '');
+  kbBreadcrumbs.innerHTML = '';
+  const isSuperadmin = state.adminRole === 'superadmin';
+
+  let toolbarHtml = '<div class="kb-toolbar-row"><h2 class="kb-section-title">База знаний</h2>';
+  if (isSuperadmin) {
+    toolbarHtml += '<button class="btn-sm btn-accent" id="kbManageCatsBtn" title="Управление категориями"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/></svg> Категории</button>';
+  }
+  toolbarHtml += '</div><div class="kb-search-row"><input class="kb-search-input" id="kbSearchInput" placeholder="Поиск по статьям..." /></div>';
+  kbToolbar.innerHTML = toolbarHtml;
+
+  if (isSuperadmin) {
+    document.getElementById('kbManageCatsBtn')?.addEventListener('click', openKbCategoriesManager);
+  }
+
+  let searchTimer;
+  document.getElementById('kbSearchInput')?.addEventListener('input', (e) => {
+    clearTimeout(searchTimer);
+    searchTimer = setTimeout(() => kbSearch(e.target.value), 300);
+  });
+
+  try {
+    const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+    state.kbCategories = cats;
+    if (!cats.length) {
+      kbContent.innerHTML = '<p class="kb-empty">Категории ещё не созданы</p>';
+      return;
+    }
+
+    kbContent.innerHTML = '<div class="kb-categories-grid">' + cats.map((c) => `
+      <div class="kb-category-card" data-cat-id="${esc(c.id)}">
+        <div class="kb-cat-icon">${kbIcon(c.icon)}</div>
+        <div class="kb-cat-name">${esc(c.name)}</div>
+        <div class="kb-cat-count">${c.articleCount} ${kbPlural(c.articleCount, 'статья', 'статьи', 'статей')}</div>
+      </div>
+    `).join('') + '</div>';
+
+    kbContent.querySelectorAll('.kb-category-card').forEach((card) => {
+      card.addEventListener('click', () => {
+        state.kbView = 'articles';
+        state.kbCategoryId = card.dataset.catId;
+        loadKbView();
+      });
+    });
+  } catch (err) {
+    msg(kbMessage, err.message, 'error');
+  }
+}
+
+function kbPlural(n, one, few, many) {
+  const abs = Math.abs(n) % 100;
+  const n1 = abs % 10;
+  if (abs > 10 && abs < 20) return many;
+  if (n1 > 1 && n1 < 5) return few;
+  if (n1 === 1) return one;
+  return many;
+}
+
+async function kbSearch(query) {
+  if (!query.trim()) { renderKbCategories(); return; }
+  try {
+    const articles = await api(`/api/kb/articles?pin=${encodeURIComponent(state.pin)}&search=${encodeURIComponent(query)}`);
+    renderKbArticleList(articles, `Результаты поиска: "${esc(query)}"`, true);
+  } catch (err) {
+    msg(kbMessage, err.message, 'error');
+  }
+}
+
+async function renderKbArticles() {
+  msg(kbMessage, '');
+  const cat = state.kbCategories.find((c) => c.id === state.kbCategoryId);
+  const catName = cat ? cat.name : 'Статьи';
+  const isSuperadmin = state.adminRole === 'superadmin';
+
+  kbBreadcrumbs.innerHTML = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a> <span class="kb-crumb-sep">/</span> <span class="kb-crumb-current">${esc(catName)}</span>`;
+  document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
+    e.preventDefault();
+    state.kbView = 'categories';
+    loadKbView();
+  });
+
+  let toolbarHtml = '<div class="kb-toolbar-row"><h2 class="kb-section-title">' + esc(catName) + '</h2>';
+  if (isSuperadmin) {
+    toolbarHtml += '<button class="btn-sm btn-primary" id="kbCreateArticleBtn">+ Новая статья</button>';
+  }
+  toolbarHtml += '</div>';
+  kbToolbar.innerHTML = toolbarHtml;
+
+  if (isSuperadmin) {
+    document.getElementById('kbCreateArticleBtn')?.addEventListener('click', () => openKbEditor(null));
+  }
+
+  try {
+    const articles = await api(`/api/kb/articles?pin=${encodeURIComponent(state.pin)}&category_id=${encodeURIComponent(state.kbCategoryId || '')}`);
+    renderKbArticleList(articles, null, false);
+  } catch (err) {
+    msg(kbMessage, err.message, 'error');
+  }
+}
+
+function renderKbArticleList(articles, title, isSearch) {
+  if (title) {
+    kbBreadcrumbs.innerHTML = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a> <span class="kb-crumb-sep">/</span> <span class="kb-crumb-current">${title}</span>`;
+    document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.kbView = 'categories';
+      loadKbView();
+    });
+  }
+
+  if (!articles.length) {
+    kbContent.innerHTML = '<p class="kb-empty">Статей пока нет</p>';
+    return;
+  }
+
+  kbContent.innerHTML = '<div class="kb-article-list">' + articles.map((a) => `
+    <div class="kb-article-card" data-article-id="${esc(a.id)}">
+      ${a.pinned ? '<span class="kb-pinned-badge">&#x1F4CC;</span>' : ''}
+      <div class="kb-article-card-title">${esc(a.title)}</div>
+      <div class="kb-article-card-meta">${esc(a.created_by)} &middot; ${fmtDate(a.updated_at)}</div>
+    </div>
+  `).join('') + '</div>';
+
+  kbContent.querySelectorAll('.kb-article-card').forEach((card) => {
+    card.addEventListener('click', () => {
+      state.kbView = 'article';
+      state.kbArticleId = card.dataset.articleId;
+      loadKbView();
+    });
+  });
+}
+
+async function renderKbArticle() {
+  msg(kbMessage, '');
+  const isSuperadmin = state.adminRole === 'superadmin';
+
+  try {
+    const article = await api(`/api/kb/articles/${state.kbArticleId}?pin=${encodeURIComponent(state.pin)}`);
+    const cat = state.kbCategories.find((c) => c.id === article.category_id);
+    const catName = cat ? cat.name : '';
+
+    let crumbs = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a>`;
+    if (catName) {
+      crumbs += ` <span class="kb-crumb-sep">/</span> <a href="#" class="kb-crumb" id="kbCrumbCat">${esc(catName)}</a>`;
+    }
+    crumbs += ` <span class="kb-crumb-sep">/</span> <span class="kb-crumb-current">${esc(article.title)}</span>`;
+    kbBreadcrumbs.innerHTML = crumbs;
+
+    document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.kbView = 'categories';
+      loadKbView();
+    });
+    document.getElementById('kbCrumbCat')?.addEventListener('click', (e) => {
+      e.preventDefault();
+      state.kbView = 'articles';
+      state.kbCategoryId = article.category_id;
+      loadKbView();
+    });
+
+    let toolbarHtml = '<div class="kb-toolbar-row">';
+    if (isSuperadmin) {
+      toolbarHtml += `<button class="btn-sm btn-accent" id="kbEditArticleBtn">Редактировать</button>`;
+      toolbarHtml += `<button class="btn-sm btn-danger-outline" id="kbDeleteArticleBtn">Удалить</button>`;
+    }
+    toolbarHtml += '</div>';
+    kbToolbar.innerHTML = toolbarHtml;
+
+    kbContent.innerHTML = `<article class="kb-article-reader">
+      <h1 class="kb-article-title">${esc(article.title)}</h1>
+      <div class="kb-article-meta">${esc(article.created_by)} &middot; ${fmtDate(article.updated_at)}</div>
+      <div class="kb-article-body">${article.content}</div>
+    </article>`;
+
+    if (isSuperadmin) {
+      document.getElementById('kbEditArticleBtn')?.addEventListener('click', () => openKbEditor(article));
+      document.getElementById('kbDeleteArticleBtn')?.addEventListener('click', async () => {
+        if (!confirm('Удалить статью?')) return;
+        try {
+          await api(`/api/kb/articles/${article.id}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin })
+          });
+          showToast('Статья удалена', 'ok');
+          state.kbView = article.category_id ? 'articles' : 'categories';
+          state.kbCategoryId = article.category_id;
+          loadKbView();
+        } catch (err) {
+          msg(kbMessage, err.message, 'error');
+        }
+      });
+    }
+  } catch (err) {
+    msg(kbMessage, err.message, 'error');
+  }
+}
+
+// KB Editor (Quill)
+
+function initQuill() {
+  if (state.kbQuill) return state.kbQuill;
+  if (typeof Quill === 'undefined') {
+    msg(kbEditorMessage, 'Редактор не загружен. Проверьте подключение к интернету.', 'error');
+    return null;
+  }
+  const q = new Quill('#kbQuillEditor', {
+    theme: 'snow',
+    placeholder: 'Начните писать статью...',
+    modules: {
+      toolbar: [
+        [{ header: [1, 2, 3, false] }],
+        ['bold', 'italic', 'underline', 'strike'],
+        [{ list: 'ordered' }, { list: 'bullet' }],
+        ['blockquote', 'code-block'],
+        ['link', 'image'],
+        ['clean']
+      ]
+    }
+  });
+
+  // Custom image handler - upload to server
+  q.getModule('toolbar').addHandler('image', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = 'image/jpeg,image/png,image/webp,image/gif';
+    input.click();
+    input.addEventListener('change', async () => {
+      const file = input.files[0];
+      if (!file) return;
+      const fd = new FormData();
+      fd.append('image', file);
+      fd.append('pin', state.pin);
+      try {
+        const res = await fetch('/api/kb/upload-image', { method: 'POST', body: fd });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.message || 'Ошибка загрузки');
+        const range = q.getSelection(true);
+        q.insertEmbed(range.index, 'image', data.url);
+        q.setSelection(range.index + 1);
+      } catch (err) {
+        msg(kbEditorMessage, err.message, 'error');
+      }
+    });
+  });
+
+  state.kbQuill = q;
+  return q;
+}
+
+async function openKbEditor(article) {
+  state.kbEditId = article ? article.id : null;
+  kbEditorTitle.querySelector('span').textContent = article ? 'Редактировать статью' : 'Новая статья';
+  kbEditorSubmitBtn.textContent = article ? 'Сохранить' : 'Создать';
+  msg(kbEditorMessage, '');
+
+  // Populate categories select
+  const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+  kbEditorCategory.innerHTML = cats.map((c) =>
+    `<option value="${esc(c.id)}"${article && article.category_id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`
+  ).join('');
+
+  if (!cats.length) {
+    kbEditorCategory.innerHTML = '<option value="">Сначала создайте категорию</option>';
+  }
+
+  kbEditorTitleInput.value = article ? article.title : '';
+  kbEditorPinned.checked = article ? !!article.pinned : false;
+
+  show(kbEditorPopup);
+
+  // Init Quill after popup is visible
+  setTimeout(() => {
+    const q = initQuill();
+    if (q) {
+      if (article && article.content) {
+        q.root.innerHTML = article.content;
+      } else {
+        q.root.innerHTML = '';
+      }
+    }
+  }, 100);
+}
+
+kbEditorForm.addEventListener('submit', async (e) => {
+  e.preventDefault();
+  msg(kbEditorMessage, '');
+  kbEditorSubmitBtn.disabled = true;
+
+  const q = state.kbQuill;
+  const content = q ? q.root.innerHTML : '';
+
+  const body = {
+    pin: state.pin,
+    title: kbEditorTitleInput.value.trim(),
+    category_id: kbEditorCategory.value,
+    pinned: kbEditorPinned.checked,
+    content
+  };
+
+  try {
+    if (state.kbEditId) {
+      await api(`/api/kb/articles/${state.kbEditId}`, {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      msg(kbEditorMessage, 'Статья обновлена.', 'success');
+    } else {
+      await api('/api/kb/articles', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(body)
+      });
+      msg(kbEditorMessage, 'Статья создана.', 'success');
+    }
+    setTimeout(() => { hide(kbEditorPopup); loadKbView(); }, 600);
+  } catch (err) {
+    msg(kbEditorMessage, err.message, 'error');
+  } finally {
+    kbEditorSubmitBtn.disabled = false;
+  }
+});
+
+kbEditorCancelBtn.addEventListener('click', () => hide(kbEditorPopup));
+kbEditorPopup.addEventListener('click', (e) => { if (e.target === kbEditorPopup && confirm('Закрыть редактор?')) hide(kbEditorPopup); });
+
+// KB Categories manager
+
+async function openKbCategoriesManager() {
+  msg(kbCategoriesMessage, '');
+  show(kbCategoriesPopup);
+  await renderKbCategoriesList();
+}
+
+async function renderKbCategoriesList() {
+  try {
+    const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+    if (!cats.length) {
+      kbCategoriesList.innerHTML = '<p class="kb-empty">Нет категорий</p>';
+      return;
+    }
+    kbCategoriesList.innerHTML = cats.map((c) => `
+      <div class="kb-cat-manage-item" data-cat-id="${esc(c.id)}">
+        <span class="kb-cat-manage-icon">${kbIcon(c.icon)}</span>
+        <span class="kb-cat-manage-name">${esc(c.name)}</span>
+        <span class="kb-cat-manage-count">${c.articleCount}</span>
+        <button class="btn-sm btn-danger-outline kb-cat-delete-btn" data-cat-id="${esc(c.id)}" title="Удалить">&times;</button>
+      </div>
+    `).join('');
+
+    kbCategoriesList.querySelectorAll('.kb-cat-delete-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Удалить категорию?')) return;
+        try {
+          await api(`/api/kb/categories/${btn.dataset.catId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin })
+          });
+          await renderKbCategoriesList();
+        } catch (err) {
+          msg(kbCategoriesMessage, err.message, 'error');
+        }
+      });
+    });
+  } catch (err) {
+    msg(kbCategoriesMessage, err.message, 'error');
+  }
+}
+
+kbCatAddBtn.addEventListener('click', async () => {
+  const name = kbCatNameInput.value.trim();
+  if (!name) return;
+  msg(kbCategoriesMessage, '');
+  try {
+    await api('/api/kb/categories', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, name })
+    });
+    kbCatNameInput.value = '';
+    await renderKbCategoriesList();
+  } catch (err) {
+    msg(kbCategoriesMessage, err.message, 'error');
+  }
+});
+
+kbCategoriesCloseBtn.addEventListener('click', () => {
+  hide(kbCategoriesPopup);
+  if (state.kbView === 'categories') loadKbView();
+});
+kbCategoriesPopup.addEventListener('click', (e) => { if (e.target === kbCategoriesPopup) { hide(kbCategoriesPopup); if (state.kbView === 'categories') loadKbView(); } });
 
 /* ── AI Agent ── */
 

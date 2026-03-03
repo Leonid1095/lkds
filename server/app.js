@@ -38,6 +38,7 @@ const FILES = {
   bookings: path.join(dataDir, 'bookings.json'),
   users: path.join(dataDir, 'users.json'),
   tickets: path.join(dataDir, 'tickets.json'),
+  crmConfig: path.join(dataDir, 'crm-config.json'),
   itTickets: path.join(dataDir, 'it-tickets.json'),
   suggestions: path.join(dataDir, 'suggestions.json'),
   pinRequests: path.join(dataDir, 'pin-requests.json'),
@@ -52,8 +53,8 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      scriptSrc: ["'self'"],
-      styleSrc: ["'self'", "'unsafe-inline'"],
+      scriptSrc: ["'self'", "https://cdn.jsdelivr.net"],
+      styleSrc: ["'self'", "'unsafe-inline'", "https://cdn.jsdelivr.net"],
       imgSrc: ["'self'", "data:", "blob:"],
       connectSrc: ["'self'"],
       fontSrc: ["'self'"],
@@ -222,20 +223,28 @@ async function createBotTicket(type, fio, module, category, description) {
 
 /* ── CRM config ── */
 
-const CRM_MODULES = [
-  'Модуль экономической эффективности и аналитики',
-  'Модуль развития цепей поставок и складской логистики',
-  'Модуль развития бизнеса 1',
-  'Модуль развития бизнеса 2',
-  'Модуль технологии и эффективности'
-];
+const _DEFAULT_CRM_CONFIG = {
+  modules: [
+    'Модуль экономической эффективности и аналитики',
+    'Модуль развития цепей поставок и складской логистики',
+    'Модуль развития бизнеса 1',
+    'Модуль развития бизнеса 2',
+    'Модуль технологии и эффективности'
+  ],
+  errorCategories: [
+    'Воронка продаж',
+    'Проблема с карточкой клиента',
+    'Проблема с карточкой интереса',
+    'Нет доступа',
+    'Другое'
+  ]
+};
 
-const ERROR_CATEGORIES = [
-  'Воронка продаж',
-  'Проблема с карточкой клиента',
-  'Проблема с карточкой интереса',
-  'Другое'
-];
+async function getCrmConfig() {
+  const cfg = await readJson(FILES.crmConfig, null);
+  if (cfg && Array.isArray(cfg.modules) && Array.isArray(cfg.errorCategories)) return cfg;
+  return { ..._DEFAULT_CRM_CONFIG };
+}
 
 /* ── IT Tickets config ── */
 
@@ -547,8 +556,8 @@ app.get('/api/settings', (_req, res) => {
   res.json({ publicBaseUrl, startHour: 8, endHour: 21, slotStep: 0.5, appName: 'ЛКДС — Портал сотрудника' });
 });
 
-app.get('/api/crm-config', (_req, res) => {
-  res.json({ modules: CRM_MODULES, errorCategories: ERROR_CATEGORIES });
+app.get('/api/crm-config', async (_req, res) => {
+  res.json(await getCrmConfig());
 });
 
 app.get('/api/it-config', (_req, res) => {
@@ -735,11 +744,12 @@ app.post('/api/tickets', async (req, res) => {
   const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
 
+  const crmCfg = await getCrmConfig();
   if (!['error', 'suggestion'].includes(type))
     return res.status(400).json({ message: 'Тип заявки: error или suggestion.' });
-  if (!module || !CRM_MODULES.includes(module))
+  if (!module || !crmCfg.modules.includes(module))
     return res.status(400).json({ message: 'Выберите модуль из списка.' });
-  if (type === 'error' && (!category || !ERROR_CATEGORIES.includes(category)))
+  if (type === 'error' && (!category || !crmCfg.errorCategories.includes(category)))
     return res.status(400).json({ message: 'Выберите категорию ошибки.' });
   if (!description || description.length < 10)
     return res.status(400).json({ message: 'Опишите подробнее (минимум 10 символов).' });
@@ -1207,6 +1217,58 @@ app.post('/api/admin/set-role', async (req, res) => {
   return res.json({ id: targetId, role });
 });
 
+/* ── Admin: CRM config management ── */
+
+app.post('/api/admin/crm-config', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const user = await getUserByPin(pin);
+  if (!user || user.role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+  res.json(await getCrmConfig());
+});
+
+app.post('/api/admin/crm-config-add', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const field = String(req.body.field || '').trim();
+  const value = clip(String(req.body.value || '').trim(), 200);
+
+  const user = await getUserByPin(pin);
+  if (!user || user.role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+  if (!['modules', 'errorCategories'].includes(field))
+    return res.status(400).json({ message: 'Неверное поле.' });
+  if (!value) return res.status(400).json({ message: 'Введите название.' });
+
+  try {
+    await withLock('crmConfig', async () => {
+      const cfg = await getCrmConfig();
+      if (cfg[field].includes(value)) throw Object.assign(new Error('Такой пункт уже есть.'), { status: 409 });
+      cfg[field].push(value);
+      await writeJson(FILES.crmConfig, cfg);
+    });
+    res.json({ message: 'Добавлено.' });
+  } catch (err) {
+    res.status(err.status || 500).json({ message: err.message });
+  }
+});
+
+app.post('/api/admin/crm-config-delete', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const field = String(req.body.field || '').trim();
+  const value = String(req.body.value || '').trim();
+
+  const user = await getUserByPin(pin);
+  if (!user || user.role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+  if (!['modules', 'errorCategories'].includes(field))
+    return res.status(400).json({ message: 'Неверное поле.' });
+  if (!value) return res.status(400).json({ message: 'Укажите пункт.' });
+
+  await withLock('crmConfig', async () => {
+    const cfg = await getCrmConfig();
+    cfg[field] = cfg[field].filter((v) => v !== value);
+    await writeJson(FILES.crmConfig, cfg);
+  });
+  res.json({ message: 'Удалено.' });
+});
+
 /* ── Booking cancel ── */
 
 app.post('/api/bookings/:id/cancel', async (req, res) => {
@@ -1615,6 +1677,333 @@ app.post('/api/admin/tz-export', async (req, res) => {
   res.send(Buffer.from(buffer));
 });
 
+/* ── Kanban view (superadmin only) ── */
+
+app.post('/api/admin/tz-kanban', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const allTz = await readJson(FILES.tz, []);
+
+  const fSystem = String(req.body.system || '').trim();
+  const fType = String(req.body.type || '').trim();
+  const fPriority = String(req.body.priority || '').trim();
+  const fSearch = String(req.body.search || '').trim().toLowerCase();
+
+  let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+
+  if (fSystem) items = items.filter((t) => t.system === fSystem);
+  if (fType) items = items.filter((t) => t.type === fType);
+  if (fPriority) items = items.filter((t) => t.priority === fPriority);
+  if (fSearch) items = items.filter((t) =>
+    (t.title && t.title.toLowerCase().includes(fSearch)) ||
+    (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
+    (t.owner && t.owner.toLowerCase().includes(fSearch))
+  );
+
+  items.sort((a, b) => {
+    const pa = { critical: 0, high: 1, medium: 2, low: 3 };
+    return (pa[a.priority] ?? 9) - (pa[b.priority] ?? 9) || a.created_at.localeCompare(b.created_at);
+  });
+
+  const columns = {};
+  for (const s of TZ_STATUSES) columns[s] = [];
+  for (const item of items) {
+    const col = columns[item.status];
+    if (col) col.push(item);
+  }
+
+  return res.json({ columns, transitions: TZ_TRANSITIONS, statusLabels: TZ_STATUS_LABELS });
+});
+
+app.patch('/api/tz/:id/status', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const newStatus = String(req.body.status || '').trim();
+  if (!TZ_STATUSES.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
+
+  const id = req.params.id;
+
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    const tz = allTz.find((t) => t.id === id);
+    if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+    if (tz.status === newStatus) return res.json({ message: 'Статус не изменился.', tz });
+
+    const allowed = TZ_TRANSITIONS[tz.status] || [];
+    if (!allowed.includes(newStatus)) {
+      return res.status(400).json({
+        message: `Переход из «${TZ_STATUS_LABELS[tz.status]}» в «${TZ_STATUS_LABELS[newStatus]}» не допускается.`
+      });
+    }
+
+    const changedBy = authUser.fullName || pin;
+    await recordTzHistory(tz.id, 'status', tz.status, newStatus, changedBy);
+    tz.status = newStatus;
+    tz.updated_at = new Date().toISOString();
+    await writeJson(FILES.tz, allTz);
+
+    return res.json({ message: `Статус изменён на «${TZ_STATUS_LABELS[newStatus]}».`, tz: { ...tz, flags: computeTzFlags(tz) } });
+  });
+});
+
+/* ── Knowledge Base (Wiki) ── */
+
+const kbImagesDir = path.join(dataDir, 'kb-images');
+
+const kbImageStorage = multer.diskStorage({
+  destination: kbImagesDir,
+  filename: (_req, _file, cb) => cb(null, `${randomUUID()}.tmp`)
+});
+
+const kbImageUpload = multer({
+  storage: kbImageStorage,
+  limits: { fileSize: 5 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = ['image/jpeg', 'image/png', 'image/webp', 'image/gif'];
+    cb(null, allowed.includes(file.mimetype));
+  }
+}).single('image');
+
+const KB_FILES = {
+  articles: path.join(dataDir, 'kb-articles.json'),
+  categories: path.join(dataDir, 'kb-categories.json')
+};
+
+// Categories
+
+app.get('/api/kb/categories', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const cats = await readJson(KB_FILES.categories, []);
+  const articles = await readJson(KB_FILES.articles, []);
+  const result = cats
+    .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
+    .map((c) => ({ ...c, articleCount: articles.filter((a) => a.category_id === c.id).length }));
+  return res.json(result);
+});
+
+app.post('/api/kb/categories', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const name = clip(String(req.body.name || '').trim(), 100);
+  if (name.length < 2) return res.status(400).json({ message: 'Название категории минимум 2 символа.' });
+  const icon = clip(String(req.body.icon || 'folder').trim(), 30);
+
+  return withLock(KB_FILES.categories, async () => {
+    const cats = await readJson(KB_FILES.categories, []);
+    if (cats.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
+      return res.status(400).json({ message: 'Категория с таким названием уже существует.' });
+    }
+    const cat = { id: randomUUID(), name, icon, order: cats.length };
+    cats.push(cat);
+    await writeJson(KB_FILES.categories, cats);
+    return res.status(201).json({ message: 'Категория создана.', category: cat });
+  });
+});
+
+app.put('/api/kb/categories/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  return withLock(KB_FILES.categories, async () => {
+    const cats = await readJson(KB_FILES.categories, []);
+    const cat = cats.find((c) => c.id === id);
+    if (!cat) return res.status(404).json({ message: 'Категория не найдена.' });
+
+    if (req.body.name !== undefined) {
+      const name = clip(String(req.body.name).trim(), 100);
+      if (name.length < 2) return res.status(400).json({ message: 'Название минимум 2 символа.' });
+      if (cats.some((c) => c.id !== id && c.name.toLowerCase() === name.toLowerCase())) {
+        return res.status(400).json({ message: 'Категория с таким названием уже существует.' });
+      }
+      cat.name = name;
+    }
+    if (req.body.icon !== undefined) cat.icon = clip(String(req.body.icon).trim(), 30);
+    if (req.body.order !== undefined) cat.order = Number(req.body.order) || 0;
+
+    await writeJson(KB_FILES.categories, cats);
+    return res.json({ message: 'Категория обновлена.', category: cat });
+  });
+});
+
+app.delete('/api/kb/categories/:id', async (req, res) => {
+  const pin = String(req.body.pin || req.query.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  return withLock(KB_FILES.categories, async () => {
+    const cats = await readJson(KB_FILES.categories, []);
+    const articles = await readJson(KB_FILES.articles, []);
+    if (articles.some((a) => a.category_id === id)) {
+      return res.status(400).json({ message: 'Нельзя удалить категорию со статьями. Сначала удалите или перенесите статьи.' });
+    }
+    const idx = cats.findIndex((c) => c.id === id);
+    if (idx === -1) return res.status(404).json({ message: 'Категория не найдена.' });
+    cats.splice(idx, 1);
+    await writeJson(KB_FILES.categories, cats);
+    return res.json({ message: 'Категория удалена.' });
+  });
+});
+
+// Articles
+
+app.get('/api/kb/articles', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const articles = await readJson(KB_FILES.articles, []);
+  const catId = String(req.query.category_id || '').trim();
+  const search = String(req.query.search || '').trim().toLowerCase();
+
+  let items = articles;
+  if (catId) items = items.filter((a) => a.category_id === catId);
+  if (search) items = items.filter((a) =>
+    (a.title && a.title.toLowerCase().includes(search)) ||
+    (a.content && a.content.replace(/<[^>]+>/g, '').toLowerCase().includes(search))
+  );
+
+  items.sort((a, b) => {
+    if (a.pinned !== b.pinned) return a.pinned ? -1 : 1;
+    return b.updated_at.localeCompare(a.updated_at);
+  });
+
+  const list = items.map(({ content, ...rest }) => rest);
+  return res.json(list);
+});
+
+app.get('/api/kb/articles/:id', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const articles = await readJson(KB_FILES.articles, []);
+  const article = articles.find((a) => a.id === req.params.id);
+  if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
+  return res.json(article);
+});
+
+app.post('/api/kb/articles', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const title = clip(String(req.body.title || '').trim(), 300);
+  if (title.length < 3) return res.status(400).json({ message: 'Название минимум 3 символа.' });
+  const content = String(req.body.content || '').trim();
+  if (content.length < 10) return res.status(400).json({ message: 'Содержимое слишком короткое.' });
+  const categoryId = String(req.body.category_id || '').trim();
+  const pinned = !!req.body.pinned;
+
+  const cats = await readJson(KB_FILES.categories, []);
+  if (categoryId && !cats.some((c) => c.id === categoryId)) {
+    return res.status(400).json({ message: 'Категория не найдена.' });
+  }
+
+  return withLock(KB_FILES.articles, async () => {
+    const articles = await readJson(KB_FILES.articles, []);
+    const article = {
+      id: randomUUID(),
+      title,
+      content: clip(content, 200000),
+      category_id: categoryId || null,
+      pinned,
+      created_by: authUser.fullName || 'superadmin',
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    articles.push(article);
+    await writeJson(KB_FILES.articles, articles);
+    return res.status(201).json({ message: 'Статья создана.', article: { ...article, content: undefined } });
+  });
+});
+
+app.put('/api/kb/articles/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  return withLock(KB_FILES.articles, async () => {
+    const articles = await readJson(KB_FILES.articles, []);
+    const article = articles.find((a) => a.id === id);
+    if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
+
+    if (req.body.title !== undefined) {
+      const t = clip(String(req.body.title).trim(), 300);
+      if (t.length < 3) return res.status(400).json({ message: 'Название минимум 3 символа.' });
+      article.title = t;
+    }
+    if (req.body.content !== undefined) {
+      article.content = clip(String(req.body.content).trim(), 200000);
+    }
+    if (req.body.category_id !== undefined) {
+      const catId = String(req.body.category_id).trim();
+      if (catId) {
+        const cats = await readJson(KB_FILES.categories, []);
+        if (!cats.some((c) => c.id === catId)) return res.status(400).json({ message: 'Категория не найдена.' });
+      }
+      article.category_id = catId || null;
+    }
+    if (req.body.pinned !== undefined) article.pinned = !!req.body.pinned;
+
+    article.updated_at = new Date().toISOString();
+    await writeJson(KB_FILES.articles, articles);
+    return res.json({ message: 'Статья обновлена.' });
+  });
+});
+
+app.delete('/api/kb/articles/:id', async (req, res) => {
+  const pin = String(req.body.pin || req.query.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  return withLock(KB_FILES.articles, async () => {
+    const articles = await readJson(KB_FILES.articles, []);
+    const idx = articles.findIndex((a) => a.id === id);
+    if (idx === -1) return res.status(404).json({ message: 'Статья не найдена.' });
+    articles.splice(idx, 1);
+    await writeJson(KB_FILES.articles, articles);
+    return res.json({ message: 'Статья удалена.' });
+  });
+});
+
+// KB image upload
+
+app.post('/api/kb/upload-image', (req, res) => {
+  kbImageUpload(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'Файл слишком большой (макс 5 МБ).' });
+      return res.status(400).json({ message: 'Ошибка загрузки файла.' });
+    }
+    if (!req.file) return res.status(400).json({ message: 'Файл не выбран.' });
+
+    const pin = String(req.body.pin || '').trim();
+    if (!(await requireSuperAdmin(pin))) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({ message: 'Нет доступа.' });
+    }
+
+    const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
+    const finalName = `${randomUUID()}${ext}`;
+    const finalPath = path.join(kbImagesDir, finalName);
+    await fs.rename(req.file.path, finalPath);
+    return res.json({ url: `/api/kb/images/${finalName}` });
+  });
+});
+
+app.get('/api/kb/images/:filename', (req, res) => {
+  const filename = path.basename(req.params.filename);
+  const filePath = path.join(kbImagesDir, filename);
+  res.sendFile(filePath, (err) => {
+    if (err) res.status(404).json({ message: 'Изображение не найдено.' });
+  });
+});
+
 /* ── AI Agent endpoints (superadmin only) ── */
 
 app.post('/api/admin/ai-task', async (req, res) => {
@@ -1677,6 +2066,8 @@ app.post('/api/admin/ai-task-cancel', async (req, res) => {
 app.get('*', (_req, res) => {
   res.sendFile(path.join(publicDir, 'index.html'));
 });
+
+fs.mkdir(kbImagesDir, { recursive: true }).catch(() => {});
 
 migrateUsers()
   .then(() => {

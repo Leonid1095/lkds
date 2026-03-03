@@ -8,6 +8,7 @@
     <title>ЛКДС — Портал сотрудника</title>
     <link rel="icon" type="image/svg+xml" href="/favicon.svg" />
     <link rel="stylesheet" href="/styles.css" />
+    <link href="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.snow.css" rel="stylesheet" />
   </head>
   <body>
     <!-- ══════ Экран авторизации ══════ -->
@@ -163,6 +164,10 @@
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 2a4 4 0 0 1 4 4v1h1a3 3 0 0 1 3 3v1a3 3 0 0 1-3 3h-1v2a4 4 0 0 1-8 0v-2H7a3 3 0 0 1-3-3v-1a3 3 0 0 1 3-3h1V6a4 4 0 0 1 4-4z"/><circle cx="9" cy="10" r="1"/><circle cx="15" cy="10" r="1"/></svg>
           AI
         </button>
+        <button class="tab" data-tab="kb" id="tabKb" style="display:none">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          База знаний
+        </button>
         <button class="tab" data-tab="links">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>
           Ссылки
@@ -242,6 +247,16 @@
           </div>
         </section>
 
+        <!-- База знаний -->
+        <section class="panel" id="panelKb">
+          <div class="card slide-up">
+            <div id="kbBreadcrumbs" class="kb-breadcrumbs"></div>
+            <div id="kbToolbar" class="kb-toolbar"></div>
+            <div id="kbContent"></div>
+            <p id="kbMessage" class="message"></p>
+          </div>
+        </section>
+
         <!-- Ссылки -->
         <section class="panel" id="panelLinks">
           <div class="card slide-up">
@@ -259,6 +274,7 @@
               <button class="admin-tab" data-atab="suggestions">Идеи</button>
               <button class="admin-tab" data-atab="users">Пользователи</button>
               <button class="admin-tab" data-atab="pin-requests">Пин-коды <span id="pinRequestsBadge" class="badge-count hidden"></span></button>
+              <button class="admin-tab" data-atab="crm-config">CRM-конфиг</button>
             </div>
             <div id="adminContent" class="admin-content"></div>
           </div>
@@ -500,9 +516,62 @@
       </div>
     </div>
 
+    <!-- ══════ Popup редактора статьи (Wiki) ══════ -->
+    <div id="kbEditorPopup" class="popup-overlay hidden">
+      <div class="popup-card fade-in kb-editor-popup-card">
+        <h3 id="kbEditorTitle">
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>
+          <span>Новая статья</span>
+        </h3>
+        <form id="kbEditorForm" class="popup-form">
+          <div class="kb-editor-grid">
+            <label>
+              Заголовок *
+              <input id="kbEditorTitleInput" required placeholder="Название статьи" />
+            </label>
+            <label>
+              Категория *
+              <select id="kbEditorCategory" required></select>
+            </label>
+          </div>
+          <label class="kb-pinned-label">
+            <input type="checkbox" id="kbEditorPinned" /> Закрепить вверху списка
+          </label>
+          <div id="kbQuillContainer">
+            <div id="kbQuillEditor"></div>
+          </div>
+          <div class="popup-actions">
+            <button type="submit" class="btn-primary" id="kbEditorSubmitBtn">Создать</button>
+            <button type="button" id="kbEditorCancelBtn" class="btn-outline-dark">Отмена</button>
+          </div>
+        </form>
+        <p id="kbEditorMessage" class="message"></p>
+      </div>
+    </div>
+
+    <!-- ══════ Popup управления категориями (Wiki) ══════ -->
+    <div id="kbCategoriesPopup" class="popup-overlay hidden">
+      <div class="popup-card fade-in">
+        <h3>
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"/></svg>
+          Категории базы знаний
+        </h3>
+        <div id="kbCategoriesList" class="kb-categories-manage-list"></div>
+        <div class="kb-cat-add-row">
+          <input id="kbCatNameInput" placeholder="Название новой категории" />
+          <button type="button" id="kbCatAddBtn" class="btn-primary btn-sm">Добавить</button>
+        </div>
+        <div class="popup-actions">
+          <button type="button" id="kbCategoriesCloseBtn" class="btn-outline-dark">Закрыть</button>
+        </div>
+        <p id="kbCategoriesMessage" class="message"></p>
+      </div>
+    </div>
+
     <!-- ══════ Toast-уведомления ══════ -->
     <div id="toastContainer" class="toast-container"></div>
 
+    <script src="https://cdn.jsdelivr.net/npm/quill@2/dist/quill.js"></script>
     <script type="module" src="/app.js"></script>
   </body>
 </html>

@@ -13,3 +13,6 @@ data/tickets.json
 data/it-tickets.json
 data/pin-requests.json
 data/suggestions.json
+data/kb-articles.json
+data/kb-categories.json
+data/kb-images/
