@@ -444,16 +444,10 @@ const TZ_TYPES = ['ТЗ', 'Дефект', 'Заявка'];
 const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
 const TZ_PRIORITIES = ['low', 'medium', 'high', 'critical'];
 
-const TZ_TRANSITIONS = {
-  draft: ['review', 'cancelled'],
-  review: ['analysis', 'cancelled'],
-  analysis: ['development', 'cancelled'],
-  development: ['testing', 'cancelled'],
-  testing: ['release', 'development', 'cancelled'],
-  release: ['production', 'cancelled'],
-  production: [],
-  cancelled: ['draft']
-};
+// Free-form transitions (Jira-style): any status → any other status
+const TZ_TRANSITIONS = Object.fromEntries(
+  TZ_STATUSES.map(s => [s, TZ_STATUSES.filter(t => t !== s)])
+);
 
 const TZ_STATUS_ORD = _TZ_STATUS_ORD;
 const TZ_STATUS_LABELS = _TZ_STATUS_LABELS;
@@ -1383,6 +1377,7 @@ app.post('/api/tz', async (req, res) => {
   const owner = clip(String(req.body.owner || '').trim(), 100);
   const link_confluence = clip(String(req.body.link_confluence || '').trim(), 500);
   const link_jira = clip(String(req.body.link_jira || '').trim(), 500);
+  const completion_notes = clip(String(req.body.completion_notes || '').trim(), 5000);
   const date_analysis_deadline = String(req.body.date_analysis_deadline || '').trim();
   const date_dev_deadline = String(req.body.date_dev_deadline || '').trim();
   const date_release_deadline = String(req.body.date_release_deadline || '').trim();
@@ -1428,6 +1423,7 @@ app.post('/api/tz', async (req, res) => {
       owner,
       link_confluence,
       link_jira,
+      completion_notes,
       date_analysis_deadline: date_analysis_deadline || null,
       date_dev_deadline: date_dev_deadline || null,
       date_release_deadline: date_release_deadline || null,
@@ -1459,7 +1455,7 @@ app.put('/api/tz/:id', async (req, res) => {
 
     const editableFields = [
       'title', 'system', 'type', 'priority', 'status',
-      'description', 'owner', 'link_confluence', 'link_jira',
+      'description', 'owner', 'link_confluence', 'link_jira', 'completion_notes',
       'date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline'
     ];
 
@@ -1495,6 +1491,7 @@ app.put('/api/tz/:id', async (req, res) => {
       if (field === 'owner') newVal = clip(newVal, 100);
       if (field === 'link_confluence') newVal = clip(newVal, 500);
       if (field === 'link_jira') newVal = clip(newVal, 500);
+      if (field === 'completion_notes') newVal = clip(newVal, 5000);
       if (['date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline'].includes(field)) {
         if (newVal && !isValidDate(newVal)) continue;
         newVal = newVal || null;
@@ -1626,6 +1623,7 @@ app.post('/api/admin/tz-export', async (req, res) => {
     { header: 'Статус', key: 'status', width: 18 },
     { header: 'Ответственный', key: 'owner', width: 22 },
     { header: 'Описание', key: 'description', width: 50 },
+    { header: 'Примечания к выполнению', key: 'completion_notes', width: 40 },
     { header: 'Confluence', key: 'link_confluence', width: 30 },
     { header: 'Jira', key: 'link_jira', width: 30 },
     { header: 'Дедлайн анализа', key: 'date_analysis_deadline', width: 16 },
@@ -1649,6 +1647,7 @@ app.post('/api/admin/tz-export', async (req, res) => {
       status: TZ_STATUS_LABELS[tz.status] || tz.status || '',
       owner: tz.owner || '',
       description: tz.description || '',
+      completion_notes: tz.completion_notes || '',
       link_confluence: tz.link_confluence || '',
       link_jira: tz.link_jira || '',
       date_analysis_deadline: tz.date_analysis_deadline || '',

@@ -1,6 +1,6 @@
 // Shared TZ utilities — used by server/app.js and scripts/ai-worker.js
 
-export const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
+export const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'partial', 'cancelled'];
 
 export const TZ_STATUS_LABELS = {
   draft: 'Черновик',
@@ -10,12 +10,13 @@ export const TZ_STATUS_LABELS = {
   testing: 'Тестирование',
   release: 'Релиз',
   production: 'В продакшене',
+  partial: 'Частично выполнено',
   cancelled: 'Отменено'
 };
 
 export const TZ_STATUS_ORD = {
   draft: 0, review: 1, analysis: 2, development: 3,
-  testing: 4, release: 5, production: 6, cancelled: 99
+  testing: 4, release: 5, production: 6, partial: 7, cancelled: 99
 };
 
 export function computeTzFlags(tz) {

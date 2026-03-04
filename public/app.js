@@ -1885,6 +1885,7 @@ function openTzCreateForm() {
     `<option value="${esc(s)}"${s === 'draft' ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
   ).join('');
   show(tzStatusRow);
+  hide($('tzCompletionNotesRow'));
 
   show(tzPopup);
 }
@@ -1913,6 +1914,7 @@ async function openTzDetail(id) {
     $('tzDateAnalysis').value = data.date_analysis_deadline || '';
     $('tzDateDev').value = data.date_dev_deadline || '';
     $('tzDateRelease').value = data.date_release_deadline || '';
+    $('tzCompletionNotes').value = data.completion_notes || '';
 
     // Status select — show only allowed transitions + current
     const transitions = cfg.transitions[data.status] || [];
@@ -1921,6 +1923,7 @@ async function openTzDetail(id) {
       `<option value="${esc(s)}"${s === data.status ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
     ).join('');
     show(tzStatusRow);
+    show($('tzCompletionNotesRow'));
 
     // Meta info
     tzMeta.innerHTML = `
@@ -1951,7 +1954,7 @@ function renderTzHistory(history) {
     status: 'Статус', description: 'Описание', owner: 'Ответственный',
     link_confluence: 'Confluence', link_jira: 'Jira',
     date_analysis_deadline: 'Дедлайн анализа', date_dev_deadline: 'Дедлайн разработки',
-    date_release_deadline: 'Дедлайн релиза'
+    date_release_deadline: 'Дедлайн релиза', completion_notes: 'Примечания к выполнению'
   };
 
   tzHistoryList.innerHTML = history.map((h) => {
@@ -1962,7 +1965,7 @@ function renderTzHistory(history) {
       oldV = cfg?.statusLabels?.[oldV] || oldV;
       newV = cfg?.statusLabels?.[newV] || newV;
     }
-    if (h.field === 'description') {
+    if (h.field === 'description' || h.field === 'completion_notes') {
       oldV = oldV.length > 40 ? oldV.slice(0, 40) + '...' : oldV;
       newV = newV.length > 40 ? newV.slice(0, 40) + '...' : newV;
     }
@@ -1992,7 +1995,8 @@ tzForm.addEventListener('submit', async (e) => {
     link_jira: $('tzLinkJira').value.trim(),
     date_analysis_deadline: $('tzDateAnalysis').value || '',
     date_dev_deadline: $('tzDateDev').value || '',
-    date_release_deadline: $('tzDateRelease').value || ''
+    date_release_deadline: $('tzDateRelease').value || '',
+    completion_notes: $('tzCompletionNotes').value.trim()
   };
 
   try {
@@ -2113,10 +2117,10 @@ async function loadItStatus(ticketId) {
 
 const KANBAN_STATUS_COLORS = {
   draft: '#edf2f7', review: '#fefcbf', analysis: '#bee3f8', development: '#c3dafe',
-  testing: '#e9d8fd', release: '#feebc8', production: '#c6f6d5', cancelled: '#fed7d7'
+  testing: '#e9d8fd', release: '#feebc8', production: '#c6f6d5', partial: '#fde68a', cancelled: '#fed7d7'
 };
 
-const KANBAN_DISPLAY_ORDER = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
+const KANBAN_DISPLAY_ORDER = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'partial', 'cancelled'];
 
 function renderKanban(data) {
   if (!tzListContainer) return;
@@ -2147,6 +2151,7 @@ function renderKanban(data) {
           <div class="kanban-card-code">${esc(tz.tz_code)}</div>
           <div class="kanban-card-title">${esc(tz.title)}</div>
           ${tz.owner ? `<div class="kanban-card-owner">${esc(tz.owner)}</div>` : ''}
+          ${tz.completion_notes ? '<span class="kanban-flag kanban-flag-notes" title="Есть примечания к выполнению">📝 Примечания</span>' : ''}
           ${flagsHtml}
         </div>
       </div>`;

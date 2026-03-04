@@ -59,7 +59,7 @@ async function sendTzDigest() {
   }
 
   const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
-  const active = withFlags.filter((t) => t.status !== 'cancelled' && t.status !== 'production');
+  const active = withFlags.filter((t) => !['cancelled', 'production', 'partial'].includes(t.status));
 
   const overdue = active.filter((t) => t.flags.overdue);
   const soon = active.filter((t) => t.flags.deadline_soon);
@@ -67,7 +67,7 @@ async function sendTzDigest() {
 
   const statusCounts = {};
   for (const tz of allTz) statusCounts[tz.status] = (statusCounts[tz.status] || 0) + 1;
-  const inWork = allTz.filter((t) => !['draft', 'cancelled', 'production'].includes(t.status)).length;
+  const inWork = allTz.filter((t) => !['draft', 'cancelled', 'production', 'partial'].includes(t.status)).length;
 
   const [d, m, y] = today.split('-').reverse();
   const dateStr = `${d}.${m}.${y}`;
@@ -105,7 +105,7 @@ async function sendTzDigest() {
     text += '\n✅ Все дедлайны в порядке\n';
   }
 
-  text += `\n📊 Всего ТЗ: ${allTz.length} | В работе: ${inWork} | Завершено: ${statusCounts.production || 0} | Черновик: ${statusCounts.draft || 0}`;
+  text += `\n📊 Всего ТЗ: ${allTz.length} | В работе: ${inWork} | Завершено: ${statusCounts.production || 0} | Частично: ${statusCounts.partial || 0} | Черновик: ${statusCounts.draft || 0}`;
 
   for (const id of adminIds) {
     await sendTelegram(id, text);
