@@ -140,12 +140,6 @@ const kbCatAddBtn = $('kbCatAddBtn');
 const kbCategoriesCloseBtn = $('kbCategoriesCloseBtn');
 const kbCategoriesMessage = $('kbCategoriesMessage');
 
-/* ── Team DOM ── */
-const tabTeam = $('tabTeam');
-const teamGrid = $('teamGrid');
-const teamMessage = $('teamMessage');
-const teamSearchInput = $('teamSearchInput');
-
 /* ── Metrics DOM ── */
 const tabMetrics = $('tabMetrics');
 const metricsContent = $('metricsContent');
@@ -207,7 +201,6 @@ const state = {
   kbEditId: null,
   kbQuill: null,
   tzTemplates: [],
-  teamMembers: [],
   metricsCharts: [],
   adminPage: {} // { [type]: currentPage }
 };
@@ -299,7 +292,6 @@ function switchToTab(tabName, updateHash) {
   $('panel' + panelName).classList.add('active');
   if (tabName === 'tz') loadTzData();
   if (tabName === 'kb') loadKbView();
-  if (tabName === 'team') loadTeamMembers();
   if (tabName === 'metrics') loadMetrics();
   if (tabName === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
   if (updateHash !== false) location.hash = tabName === 'kb' ? 'w' : tabName;
@@ -405,7 +397,6 @@ function showMain() {
   tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabKb.style.display = state.pin ? '' : 'none';
-  tabTeam.style.display = state.pin ? '' : 'none';
   tabMetrics.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   updateTzBadge();
 }
@@ -3796,49 +3787,6 @@ async function performGlobalSearch(q) {
   } catch { hide(globalSearchResults); }
 }
 
-/* ── Team Directory ── */
-
-async function loadTeamMembers() {
-  if (!state.pin) return;
-  try {
-    const members = await api(`/api/team/members?pin=${encodeURIComponent(state.pin)}`);
-    state.teamMembers = members;
-    renderTeamGrid(members);
-  } catch (err) {
-    msg(teamMessage, err.message, 'error');
-  }
-}
-
-function renderTeamGrid(members) {
-  if (!teamGrid) return;
-  if (!members.length) { teamGrid.innerHTML = '<p class="team-empty">Нет сотрудников</p>'; return; }
-  teamGrid.innerHTML = members.map((m) => {
-    const avatar = m.avatar ? `/api/avatars/${esc(m.avatar)}` : DEFAULT_AVATAR;
-    const loc = m.workLocation ? `<span class="team-location">${esc(m.workLocation)}${m.workDesk ? ', стол ' + esc(String(m.workDesk)) : ''}</span>` : '';
-    return `<div class="team-card" data-user-id="${esc(m.id)}">
-      <img class="team-avatar" src="${avatar}" alt="" />
-      <div class="team-info">
-        <div class="team-name">${esc(m.fullName)}</div>
-        ${m.position ? `<div class="team-position">${esc(m.position)}</div>` : ''}
-        ${loc}
-        ${m.contact ? `<div class="team-contact">${esc(m.contact)}</div>` : ''}
-      </div>
-    </div>`;
-  }).join('');
-}
-
-function initTeamSearch() {
-  if (!teamSearchInput) return;
-  teamSearchInput.addEventListener('input', () => {
-    const q = teamSearchInput.value.trim().toLowerCase();
-    if (!q) { renderTeamGrid(state.teamMembers); return; }
-    const filtered = state.teamMembers.filter((m) =>
-      m.fullName.toLowerCase().includes(q) || (m.position || '').toLowerCase().includes(q) || (m.workLocation || '').toLowerCase().includes(q)
-    );
-    renderTeamGrid(filtered);
-  });
-}
-
 /* ── TZ Task Links ── */
 
 function renderTzLinks(tz, allTzList) {
@@ -4134,7 +4082,6 @@ if (itStatusMatch) {
     if (loggedIn) {
       showMain(); await loadApp(); showTzNotifications();
       initGlobalSearch();
-      initTeamSearch();
       await restoreFromHash();
     }
     else { showAuth(); }

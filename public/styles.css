@@ -1450,27 +1450,6 @@ button{
   .global-search-results{width:260px}
 }
 
-/* ── Team Directory ── */
-.team-search-wrap{margin-bottom:16px}
-.team-search-input{
-  width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:10px;
-  font:inherit;font-size:14px;
-}
-.team-search-input:focus{outline:none;border-color:var(--accent)}
-.team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
-.team-card{
-  display:flex;gap:14px;padding:16px;background:#fff;border:1.5px solid var(--border);
-  border-radius:12px;transition:box-shadow .2s;
-}
-.team-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.06)}
-.team-avatar{width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0}
-.team-info{min-width:0}
-.team-name{font-weight:600;font-size:15px;color:var(--text-main)}
-.team-position{font-size:13px;color:var(--text-sec);margin-top:2px}
-.team-location{font-size:12px;color:var(--accent);display:block;margin-top:2px}
-.team-contact{font-size:12px;color:var(--text-sec);margin-top:4px;word-break:break-all}
-.team-empty{text-align:center;color:var(--text-sec);padding:40px}
-
 /* ── TZ Templates ── */
 .tz-template-row{
   display:flex;align-items:flex-end;gap:8px;margin-bottom:12px;padding:10px 12px;
