@@ -1,11 +1,13 @@
 {
-  "name": "meeting-room-booking",
-  "version": "0.1.0",
+  "name": "lkds-platform",
+  "version": "2.0.0",
+  "description": "Корпоративная платформа ЛКДС — задачи, база знаний, ИТ-заявки, бронирование",
   "private": true,
   "type": "module",
   "scripts": {
     "start": "node server/app.js",
-    "dev": "node --watch server/app.js"
+    "dev": "node --watch server/app.js",
+    "worker": "node scripts/ai-worker.js"
   },
   "dependencies": {
     "dotenv": "^16.4.7",
@@ -15,5 +17,8 @@
     "helmet": "^8.1.0",
     "multer": "^2.0.2",
     "nodemailer": "^8.0.1"
+  },
+  "engines": {
+    "node": ">=18.0.0"
   }
 }
