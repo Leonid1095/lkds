@@ -46,7 +46,8 @@ const FILES = {
   tzHistory: path.join(dataDir, 'tz-history.json'),
   boards: path.join(dataDir, 'boards.json'),
   aiTasks: path.join(dataDir, 'ai-tasks.json'),
-  tzComments: path.join(dataDir, 'tz-comments.json')
+  tzComments: path.join(dataDir, 'tz-comments.json'),
+  tzTemplates: path.join(dataDir, 'tz-templates.json')
 };
 
 /* ── Security middleware ── */
@@ -82,6 +83,16 @@ const registerLimiter = rateLimit({
   standardHeaders: true,
   legacyHeaders: false
 });
+
+const adminLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 120,
+  message: { message: 'Слишком много запросов. Подождите минуту.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+
+app.use('/api/admin', adminLimiter);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -1281,8 +1292,7 @@ app.post('/api/admin/set-role', async (req, res) => {
 
 app.post('/api/admin/crm-config', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const user = await getUserByPin(pin);
-  if (!user || user.role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   res.json(await getCrmConfig());
 });
 
@@ -1291,8 +1301,7 @@ app.post('/api/admin/crm-config-add', async (req, res) => {
   const field = String(req.body.field || '').trim();
   const value = clip(String(req.body.value || '').trim(), 200);
 
-  const user = await getUserByPin(pin);
-  if (!user || user.role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!['modules', 'errorCategories'].includes(field))
     return res.status(400).json({ message: 'Неверное поле.' });
   if (!value) return res.status(400).json({ message: 'Введите название.' });
@@ -1315,8 +1324,7 @@ app.post('/api/admin/crm-config-delete', async (req, res) => {
   const field = String(req.body.field || '').trim();
   const value = String(req.body.value || '').trim();
 
-  const user = await getUserByPin(pin);
-  if (!user || user.role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!['modules', 'errorCategories'].includes(field))
     return res.status(400).json({ message: 'Неверное поле.' });
   if (!value) return res.status(400).json({ message: 'Укажите пункт.' });
@@ -1754,6 +1762,7 @@ app.post('/api/tz', async (req, res) => {
       assignee_id: assignee_id || null,
       assigned_by_id: assignee_id ? authUser.id : null,
       deadline: deadline || null,
+      linked_tz_ids: [],
       created_by: creatorName,
       created_by_id: authUser.id,
       created_at: new Date().toISOString(),
@@ -1809,7 +1818,7 @@ app.put('/api/tz/:id', async (req, res) => {
       'title', 'system', 'type', 'priority', 'status',
       'description', 'owner', 'link_confluence', 'link_jira', 'completion_notes',
       'date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline',
-      'assignee_id', 'deadline'
+      'assignee_id', 'deadline', 'linked_tz_ids'
     ];
 
     // Status transition check — validate against board columns
@@ -1860,6 +1869,12 @@ app.put('/api/tz/:id', async (req, res) => {
         if (newVal && newVal !== (tz.assignee_id || null)) {
           tz.assigned_by_id = authUser.id;
         }
+      }
+      if (field === 'linked_tz_ids') {
+        if (!Array.isArray(newVal)) continue;
+        newVal = newVal.filter((lid) => UUID_RE.test(lid) && lid !== id).slice(0, 20);
+        tz.linked_tz_ids = newVal;
+        continue; // skip history for array field
       }
 
       const oldVal = tz[field] ?? null;
@@ -2182,6 +2197,61 @@ ${JSON.stringify(rows, null, 2)}`;
   });
 });
 
+/* ── TZ Bulk operations (superadmin only) ── */
+
+app.post('/api/admin/tz-bulk', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const ids = req.body.ids;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ message: 'Выберите хотя бы одно ТЗ.' });
+  if (ids.length > 100) return res.status(400).json({ message: 'Максимум 100 элементов за раз.' });
+  if (!ids.every((id) => UUID_RE.test(id))) return res.status(400).json({ message: 'Некорректные ID.' });
+
+  const action = String(req.body.action || '').trim();
+  const value = String(req.body.value || '').trim();
+
+  if (!['status', 'priority', 'assignee'].includes(action)) return res.status(400).json({ message: 'Неизвестное действие.' });
+  if (!value && action !== 'assignee') return res.status(400).json({ message: 'Укажите значение.' });
+
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    let updated = 0;
+    const changedBy = authUser.fullName;
+    const now = new Date().toISOString();
+
+    for (const id of ids) {
+      const tz = allTz.find((t) => t.id === id);
+      if (!tz) continue;
+
+      if (action === 'status' && tz.status !== value) {
+        await recordTzHistory(tz.id, 'status', tz.status, value, changedBy);
+        tz.status = value;
+        tz.updated_at = now;
+        updated++;
+      } else if (action === 'priority' && tz.priority !== value) {
+        await recordTzHistory(tz.id, 'priority', tz.priority, value, changedBy);
+        tz.priority = value;
+        tz.updated_at = now;
+        updated++;
+      } else if (action === 'assignee') {
+        const newVal = value || null;
+        if (tz.assignee_id !== newVal) {
+          await recordTzHistory(tz.id, 'assignee_id', tz.assignee_id || '', newVal || '', changedBy);
+          tz.assignee_id = newVal;
+          tz.assigned_by_id = authUser.id;
+          tz.updated_at = now;
+          updated++;
+        }
+      }
+    }
+
+    await writeJson(FILES.tz, allTz);
+    return res.json({ message: `Обновлено: ${updated} из ${ids.length}.`, updated });
+  });
+});
+
 /* ── Kanban view (superadmin only) ── */
 
 app.post('/api/admin/tz-kanban', async (req, res) => {
@@ -2222,11 +2292,32 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
   // Free-form transitions: any column → any other column
   const transitions = Object.fromEntries(colIds.map(s => [s, colIds.filter(t => t !== s)]));
 
+  // Swimlane grouping
+  const swimlane = String(req.body.swimlane || '').trim(); // 'priority' | 'assignee' | ''
+  let swimlanes = null;
+  if (swimlane === 'priority') {
+    const prios = ['critical', 'high', 'medium', 'low'];
+    swimlanes = prios.map((p) => ({
+      key: p, label: { critical: 'Критический', high: 'Высокий', medium: 'Средний', low: 'Низкий' }[p] || p,
+      columns: Object.fromEntries(colIds.map((s) => [s, (columns[s] || []).filter((t) => t.priority === p)]))
+    }));
+  } else if (swimlane === 'assignee') {
+    const assigneeMap = new Map();
+    for (const item of items) {
+      const key = item.assignee_name || item.owner || 'Не назначен';
+      if (!assigneeMap.has(key)) assigneeMap.set(key, Object.fromEntries(colIds.map((s) => [s, []])));
+      const group = assigneeMap.get(key);
+      if (group[item.status]) group[item.status].push(item);
+    }
+    swimlanes = [...assigneeMap.entries()].map(([key, cols]) => ({ key, label: key, columns: cols }));
+  }
+
   return res.json({
     columns,
     transitions,
     statusLabels,
-    boardColumns: boardColumns || null
+    boardColumns: boardColumns || null,
+    swimlanes
   });
 });
 
@@ -2704,6 +2795,179 @@ app.post('/api/admin/ai-task-cancel', async (req, res) => {
     await writeJson(FILES.aiTasks, tasks);
     return res.json({ ok: true });
   });
+});
+
+/* ── TZ Templates (superadmin) ── */
+
+app.get('/api/tz-templates', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const templates = await readJson(FILES.tzTemplates, []);
+  return res.json(templates);
+});
+
+app.post('/api/tz-templates', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const name = clip(String(req.body.name || '').trim(), 100);
+  if (name.length < 2) return res.status(400).json({ message: 'Название шаблона минимум 2 символа.' });
+  const f = req.body.fields || {};
+  return withLock(FILES.tzTemplates, async () => {
+    const templates = await readJson(FILES.tzTemplates, []);
+    const tpl = {
+      id: randomUUID(), name,
+      fields: {
+        system: String(f.system || '').slice(0, 50),
+        type: String(f.type || 'ТЗ').slice(0, 50),
+        priority: String(f.priority || 'medium').slice(0, 20),
+        description: String(f.description || '').slice(0, 5000),
+        owner: String(f.owner || '').slice(0, 100)
+      },
+      created_at: new Date().toISOString()
+    };
+    templates.push(tpl);
+    await writeJson(FILES.tzTemplates, templates);
+    return res.status(201).json({ message: 'Шаблон создан.', template: tpl });
+  });
+});
+
+app.put('/api/tz-templates/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { id } = req.params;
+  const name = clip(String(req.body.name || '').trim(), 100);
+  if (name.length < 2) return res.status(400).json({ message: 'Название шаблона минимум 2 символа.' });
+  const f = req.body.fields || {};
+  return withLock(FILES.tzTemplates, async () => {
+    const templates = await readJson(FILES.tzTemplates, []);
+    const tpl = templates.find((t) => t.id === id);
+    if (!tpl) return res.status(404).json({ message: 'Шаблон не найден.' });
+    tpl.name = name;
+    tpl.fields = {
+      system: String(f.system || '').slice(0, 50),
+      type: String(f.type || 'ТЗ').slice(0, 50),
+      priority: String(f.priority || 'medium').slice(0, 20),
+      description: String(f.description || '').slice(0, 5000),
+      owner: String(f.owner || '').slice(0, 100)
+    };
+    await writeJson(FILES.tzTemplates, templates);
+    return res.json({ message: 'Шаблон обновлён.' });
+  });
+});
+
+app.delete('/api/tz-templates/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const { id } = req.params;
+  return withLock(FILES.tzTemplates, async () => {
+    const templates = await readJson(FILES.tzTemplates, []);
+    const idx = templates.findIndex((t) => t.id === id);
+    if (idx === -1) return res.status(404).json({ message: 'Шаблон не найден.' });
+    templates.splice(idx, 1);
+    await writeJson(FILES.tzTemplates, templates);
+    return res.json({ message: 'Шаблон удалён.' });
+  });
+});
+
+/* ── Global Search ── */
+
+app.get('/api/search', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const q = String(req.query.q || '').trim().toLowerCase();
+  if (q.length < 2) return res.json({ tz: [], kb: [], tickets: [] });
+  const results = { tz: [], kb: [], tickets: [] };
+
+  const adminRole = getUserRole(pin, user);
+  if (adminRole === 'superadmin') {
+    const allTz = await readJson(FILES.tz, []);
+    results.tz = allTz
+      .filter((t) => t.title.toLowerCase().includes(q) || (t.tz_code || '').toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q))
+      .slice(0, 15)
+      .map((t) => ({ id: t.id, tz_code: t.tz_code, title: t.title, status: t.status, type: t.type }));
+  }
+
+  const articles = await readJson(KB_FILES.articles, []);
+  results.kb = articles
+    .filter((a) => a.title.toLowerCase().includes(q) || (a.content || '').replace(/<[^>]+>/g, '').toLowerCase().includes(q))
+    .slice(0, 10)
+    .map((a) => ({ id: a.id, title: a.title, category_id: a.category_id }));
+
+  const itTickets = await readJson(FILES.itTickets, []);
+  results.tickets = itTickets
+    .filter((t) => t.userId === user.id && ((t.description || '').toLowerCase().includes(q) || (t.category || '').toLowerCase().includes(q)))
+    .slice(0, 10)
+    .map((t) => ({ id: t.id, category: t.category, description: (t.description || '').slice(0, 100), status: t.status }));
+
+  return res.json(results);
+});
+
+/* ── Team Directory ── */
+
+app.get('/api/team/members', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const users = await readJson(FILES.users, []);
+  const members = users.map((u) => ({
+    id: u.id, fullName: u.fullName, position: u.position || '',
+    contact: u.contact || '', avatar: u.avatar || '',
+    workLocation: u.workLocation || '', workDesk: u.workDesk || ''
+  }));
+  return res.json(members);
+});
+
+/* ── TZ Metrics (superadmin) ── */
+
+app.post('/api/admin/tz-metrics', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const boardId = String(req.body.board_id || '').trim();
+  let allTz = await readJson(FILES.tz, []);
+  if (boardId) allTz = allTz.filter((t) => t.board_id === boardId);
+  const history = await readJson(FILES.tzHistory, []);
+
+  // Status distribution
+  const statusCounts = {};
+  for (const t of allTz) statusCounts[t.status] = (statusCounts[t.status] || 0) + 1;
+
+  // Priority distribution
+  const prioCounts = {};
+  for (const t of allTz) prioCounts[t.priority] = (prioCounts[t.priority] || 0) + 1;
+
+  // Type distribution
+  const typeCounts = {};
+  for (const t of allTz) typeCounts[t.type] = (typeCounts[t.type] || 0) + 1;
+
+  // Created per week (last 12 weeks)
+  const now = Date.now();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const createdPerWeek = [];
+  for (let w = 11; w >= 0; w--) {
+    const weekStart = now - (w + 1) * weekMs;
+    const weekEnd = now - w * weekMs;
+    const count = allTz.filter((t) => {
+      const ts = new Date(t.created_at).getTime();
+      return ts >= weekStart && ts < weekEnd;
+    }).length;
+    const label = new Date(weekEnd).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+    createdPerWeek.push({ label, count });
+  }
+
+  // Cycle time (created → production/release) in days for completed TZ
+  const doneTz = allTz.filter((t) => ['production', 'release', 'done'].includes(t.status));
+  const cycleTimes = [];
+  for (const t of doneTz) {
+    const created = new Date(t.created_at).getTime();
+    const relevantHistory = history.filter((h) => h.tz_id === t.id && ['production', 'release', 'done'].includes(h.new_status));
+    if (relevantHistory.length) {
+      const doneAt = new Date(relevantHistory[relevantHistory.length - 1].changed_at).getTime();
+      cycleTimes.push(Math.round((doneAt - created) / (24 * 60 * 60 * 1000)));
+    }
+  }
+  const avgCycleTime = cycleTimes.length ? Math.round(cycleTimes.reduce((a, b) => a + b, 0) / cycleTimes.length) : 0;
+
+  return res.json({ statusCounts, prioCounts, typeCounts, createdPerWeek, avgCycleTime, totalDone: doneTz.length, total: allTz.length });
 });
 
 /* ── SPA fallback ── */

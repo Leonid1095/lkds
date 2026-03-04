@@ -140,6 +140,21 @@ const kbCatAddBtn = $('kbCatAddBtn');
 const kbCategoriesCloseBtn = $('kbCategoriesCloseBtn');
 const kbCategoriesMessage = $('kbCategoriesMessage');
 
+/* ── Team DOM ── */
+const tabTeam = $('tabTeam');
+const teamGrid = $('teamGrid');
+const teamMessage = $('teamMessage');
+const teamSearchInput = $('teamSearchInput');
+
+/* ── Metrics DOM ── */
+const tabMetrics = $('tabMetrics');
+const metricsContent = $('metricsContent');
+const metricsMessage = $('metricsMessage');
+
+/* ── Global Search DOM ── */
+const globalSearchInput = $('globalSearchInput');
+const globalSearchResults = $('globalSearchResults');
+
 /* ── AI DOM ── */
 const tabAi = $('tabAi');
 const aiChat = $('aiChat');
@@ -182,6 +197,7 @@ const state = {
   tzList: [],
   tzEditId: null,
   tzViewMode: 'list', // 'list' | 'kanban'
+  tzSwimlane: '', // '' | 'priority' | 'assignee'
   tzBoardId: null, // current board id
   tzBoards: [], // board objects from config
   kbView: 'categories', // 'categories' | 'articles' | 'article'
@@ -190,12 +206,16 @@ const state = {
   kbArticleId: null,
   kbEditId: null,
   kbQuill: null,
+  tzTemplates: [],
+  teamMembers: [],
+  metricsCharts: [],
   adminPage: {} // { [type]: currentPage }
 };
 
 /* ── Module-scope timers (prevent leaks on re-render) ── */
 let _tzSearchTimer = null;
 let _kbSearchTimer = null;
+let _globalSearchTimer = null;
 
 /* ── Helpers ── */
 
@@ -279,6 +299,8 @@ function switchToTab(tabName, updateHash) {
   $('panel' + panelName).classList.add('active');
   if (tabName === 'tz') loadTzData();
   if (tabName === 'kb') loadKbView();
+  if (tabName === 'team') loadTeamMembers();
+  if (tabName === 'metrics') loadMetrics();
   if (tabName === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
   if (updateHash !== false) location.hash = tabName === 'kb' ? 'w' : tabName;
   return true;
@@ -383,6 +405,8 @@ function showMain() {
   tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabKb.style.display = state.pin ? '' : 'none';
+  tabTeam.style.display = state.pin ? '' : 'none';
+  tabMetrics.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   updateTzBadge();
 }
 
@@ -523,6 +547,7 @@ async function loadApp() {
 
   if (state.adminRole === 'superadmin' && state.tzConfig) {
     renderTzFilters();
+    await loadTzTemplates();
   }
   dateInput.value = getToday();
   await loadBookings();
@@ -1849,6 +1874,11 @@ function renderTzFilters() {
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg>
         </button>
       </div>
+      ${state.tzViewMode === 'kanban' ? `<select class="tz-filter-select tz-swimlane-select" id="tzSwimlaneSelect">
+        <option value="">Без группировки</option>
+        <option value="priority"${state.tzSwimlane === 'priority' ? ' selected' : ''}>По приоритету</option>
+        <option value="assignee"${state.tzSwimlane === 'assignee' ? ' selected' : ''}>По исполнителю</option>
+      </select>` : ''}
       </div>
     </div>
     <div class="tz-filters-row">
@@ -1881,6 +1911,9 @@ function renderTzFilters() {
       _tzSearchTimer = setTimeout(() => { state.tzFilters.search = searchEl.value; loadTzData(); }, 300);
     });
   }
+
+  const swimlaneEl = document.getElementById('tzSwimlaneSelect');
+  if (swimlaneEl) swimlaneEl.addEventListener('change', () => { state.tzSwimlane = swimlaneEl.value; loadTzData(); });
 
   const createBtn = document.getElementById('tzCreateBtn');
   if (createBtn) createBtn.addEventListener('click', openTzCreateForm);
@@ -2008,19 +2041,39 @@ function renderTzList(items) {
   }
 
   const cfg = state.tzConfig;
-  let html = '<table class="tz-table"><tr><th>Код</th><th>Название</th><th>Система</th><th>Тип</th><th>Приоритет</th><th>Статус</th><th>Ответственный</th><th>Ссылки</th></tr>';
+  const isSA = state.adminRole === 'superadmin';
+  let html = '';
+
+  // Bulk toolbar (hidden initially)
+  if (isSA) {
+    const board = getCurrentBoard();
+    const statusOpts = board
+      ? board.columns.slice().sort((a,b) => a.order - b.order).map(c => `<option value="${esc(c.id)}">${esc(c.name)}</option>`).join('')
+      : cfg.statuses.map(s => `<option value="${esc(s)}">${esc(cfg.statusLabels[s] || s)}</option>`).join('');
+    const prioOpts = cfg.priorities.map(p => `<option value="${esc(p)}">${esc(TZ_PRIO_LABELS[p] || p)}</option>`).join('');
+    html += `<div class="tz-bulk-bar hidden" id="tzBulkBar">
+      <span id="tzBulkCount">0 выбрано</span>
+      <select id="tzBulkStatus"><option value="">Статус →</option>${statusOpts}</select>
+      <select id="tzBulkPriority"><option value="">Приоритет →</option>${prioOpts}</select>
+      <button type="button" class="btn-sm btn-primary" id="tzBulkApply">Применить</button>
+      <button type="button" class="btn-sm btn-outline-dark" id="tzBulkCancel">Отмена</button>
+    </div>`;
+  }
+
+  html += `<table class="tz-table"><tr>${isSA ? '<th class="tz-cb-th"><input type="checkbox" id="tzSelectAll" /></th>' : ''}<th>Код</th><th>Название</th><th>Система</th><th>Тип</th><th>Приоритет</th><th>Статус</th><th>Ответственный</th><th>Ссылки</th></tr>`;
   for (const tz of items) {
     const f = tz.flags || {};
     let rowCls = '';
-    if (f.overdue) rowCls = ' class="tz-row-overdue"';
-    else if (f.deadline_soon) rowCls = ' class="tz-row-soon"';
-    else if (f.missing_deadline) rowCls = ' class="tz-row-missing-dl"';
+    if (f.overdue) rowCls = ' tz-row-overdue';
+    else if (f.deadline_soon) rowCls = ' tz-row-soon';
+    else if (f.missing_deadline) rowCls = ' tz-row-missing-dl';
 
     const links = [];
     if (tz.link_confluence) links.push(`<a href="${esc(tz.link_confluence)}" target="_blank" rel="noreferrer" class="tz-link-icon" title="Confluence" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg></a>`);
     if (tz.link_jira) links.push(`<a href="${esc(tz.link_jira)}" target="_blank" rel="noreferrer" class="tz-link-icon" title="Jira" onclick="event.stopPropagation()"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg></a>`);
 
-    html += `<tr${rowCls} data-tz-id="${esc(tz.id)}">
+    html += `<tr class="${rowCls}" data-tz-id="${esc(tz.id)}">
+      ${isSA ? `<td class="tz-cb-td" onclick="event.stopPropagation()"><input type="checkbox" class="tz-bulk-cb" value="${esc(tz.id)}" /></td>` : ''}
       <td class="tz-code-cell">${esc(tz.tz_code)}</td>
       <td class="tz-title-cell">${esc(tz.title)}</td>
       <td>${esc(tz.system)}</td>
@@ -2038,6 +2091,58 @@ function renderTzList(items) {
   tzListContainer.querySelectorAll('[data-tz-id]').forEach((row) => {
     row.addEventListener('click', () => openTzDetail(row.dataset.tzId));
   });
+
+  // Bulk selection logic
+  if (isSA) initTzBulk();
+}
+
+function initTzBulk() {
+  const bar = document.getElementById('tzBulkBar');
+  const countEl = document.getElementById('tzBulkCount');
+  const selectAll = document.getElementById('tzSelectAll');
+  if (!bar || !selectAll) return;
+
+  function updateBulkBar() {
+    const checked = tzListContainer.querySelectorAll('.tz-bulk-cb:checked');
+    if (checked.length) { show(bar); countEl.textContent = `${checked.length} выбрано`; }
+    else hide(bar);
+  }
+
+  selectAll.addEventListener('change', () => {
+    tzListContainer.querySelectorAll('.tz-bulk-cb').forEach(cb => { cb.checked = selectAll.checked; });
+    updateBulkBar();
+  });
+  tzListContainer.querySelectorAll('.tz-bulk-cb').forEach(cb => {
+    cb.addEventListener('change', updateBulkBar);
+  });
+
+  document.getElementById('tzBulkCancel')?.addEventListener('click', () => {
+    selectAll.checked = false;
+    tzListContainer.querySelectorAll('.tz-bulk-cb').forEach(cb => { cb.checked = false; });
+    hide(bar);
+  });
+
+  document.getElementById('tzBulkApply')?.addEventListener('click', async () => {
+    const ids = [...tzListContainer.querySelectorAll('.tz-bulk-cb:checked')].map(cb => cb.value);
+    if (!ids.length) return;
+    const statusVal = document.getElementById('tzBulkStatus')?.value;
+    const prioVal = document.getElementById('tzBulkPriority')?.value;
+    let action, value;
+    if (statusVal) { action = 'status'; value = statusVal; }
+    else if (prioVal) { action = 'priority'; value = prioVal; }
+    else { showToast('Выберите статус или приоритет', 'danger'); return; }
+
+    if (!confirm(`Применить ${action === 'status' ? 'статус' : 'приоритет'} к ${ids.length} задачам?`)) return;
+    try {
+      const result = await api('/api/admin/tz-bulk', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin, ids, action, value })
+      });
+      showToast(result.message, 'ok');
+      loadTzData();
+    } catch (err) { showToast(err.message, 'danger'); }
+  });
 }
 
 async function loadTzData() {
@@ -2046,11 +2151,13 @@ async function loadTzData() {
   const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
   try {
     if (state.tzViewMode === 'kanban') {
+      const kanbanBody = { pin: state.pin, ...state.tzFilters, ...boardPayload };
+      if (state.tzSwimlane) kanbanBody.swimlane = state.tzSwimlane;
       const [kanban, stats] = await Promise.all([
         api('/api/admin/tz-kanban', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, ...state.tzFilters, ...boardPayload })
+          body: JSON.stringify(kanbanBody)
         }),
         api('/api/admin/tz-stats', {
           method: 'POST',
@@ -2059,7 +2166,8 @@ async function loadTzData() {
         })
       ]);
       renderTzStats(stats);
-      renderKanban(kanban);
+      if (state.tzSwimlane && kanban.swimlanes) renderKanbanSwimlanes(kanban, state.tzSwimlane);
+      else renderKanban(kanban);
       updateTzBadge();
     } else {
       const [resp, stats] = await Promise.all([
@@ -2150,6 +2258,45 @@ function openTzCreateForm(presetType) {
     $('tzOwnerRow').style.display = ut ? 'none' : '';
     if (ut) $('tzSystem').value = 'OTHER';
   };
+
+  // Template dropdown (superadmin)
+  let existingTplRow = document.getElementById('tzTemplateRow');
+  if (existingTplRow) existingTplRow.remove();
+  if (isSA && state.tzTemplates && state.tzTemplates.length) {
+    const tplOpts = state.tzTemplates.map((t) => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+    const tplRow = document.createElement('div');
+    tplRow.id = 'tzTemplateRow';
+    tplRow.className = 'tz-template-row';
+    tplRow.innerHTML = `<label>Из шаблона <select id="tzTemplateSelect"><option value="">— выберите —</option>${tplOpts}</select></label>
+      <button type="button" class="btn-sm btn-outline-dark" id="tzSaveTemplateBtn" title="Сохранить текущую форму как шаблон">+ Шаблон</button>`;
+    tzForm.insertBefore(tplRow, tzForm.firstChild);
+    document.getElementById('tzTemplateSelect').addEventListener('change', (e) => {
+      const tpl = state.tzTemplates.find((t) => t.id === e.target.value);
+      if (!tpl) return;
+      const f = tpl.fields;
+      if (f.system) $('tzSystem').value = f.system;
+      if (f.type) $('tzType').value = f.type;
+      if (f.priority) $('tzPriority').value = f.priority;
+      if (f.description) $('tzDescription').value = f.description;
+      if (f.owner) $('tzOwner').value = f.owner;
+    });
+    document.getElementById('tzSaveTemplateBtn').addEventListener('click', async () => {
+      const name = prompt('Название шаблона:');
+      if (!name || name.length < 2) return;
+      try {
+        await api('/api/tz-templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pin: state.pin, name,
+            fields: { system: $('tzSystem').value, type: $('tzType').value, priority: $('tzPriority').value, description: $('tzDescription').value, owner: $('tzOwner').value }
+          })
+        });
+        showToast('Шаблон сохранён', 'ok');
+        await loadTzTemplates();
+      } catch (err) { showToast(err.message, 'danger'); }
+    });
+  }
 
   show(tzPopup);
 }
@@ -2305,6 +2452,9 @@ async function openTzDetail(id) {
     // Comments
     await renderTzComments(id);
 
+    // Linked tasks
+    renderTzLinkedTasks(id, data);
+
     show(tzPopup);
   } catch (err) {
     msg(tzMessage, err.message, 'error');
@@ -2401,6 +2551,63 @@ async function renderTzComments(tzId) {
   } catch {
     hide(tzCommentsSection);
   }
+}
+
+// TZ Linked tasks
+function renderTzLinkedTasks(tzId, data) {
+  let section = document.getElementById('tzLinksSection');
+  if (!section) {
+    section = document.createElement('div');
+    section.id = 'tzLinksSection';
+    section.className = 'tz-links-section';
+    tzCommentsSection.parentNode.insertBefore(section, tzCommentsSection);
+  }
+  const links = data.linked_tz_ids || [];
+  const isSA = state.adminRole === 'superadmin';
+  let html = '<h4>Связанные задачи</h4>';
+  if (links.length) {
+    html += '<div class="tz-links-list">';
+    for (const lid of links) {
+      const linked = state.tzList.find((t) => t.id === lid);
+      const label = linked ? `${linked.tz_code} — ${linked.title.slice(0, 40)}` : lid.slice(0, 8) + '...';
+      html += `<span class="tz-link-chip"><span class="tz-link-chip-text" data-tz-id="${esc(lid)}">${esc(label)}</span>${isSA ? `<button class="tz-link-remove" data-lid="${esc(lid)}">&times;</button>` : ''}</span>`;
+    }
+    html += '</div>';
+  } else {
+    html += '<p class="tz-links-empty">Нет связей</p>';
+  }
+  if (isSA) {
+    const tzOpts = state.tzList.filter((t) => t.id !== tzId && !links.includes(t.id)).slice(0, 50);
+    html += `<select id="tzLinkAddSelect" class="tz-link-add-select"><option value="">+ Добавить связь...</option>${tzOpts.map((t) => `<option value="${esc(t.id)}">${esc(t.tz_code)} — ${esc(t.title.slice(0, 40))}</option>`).join('')}</select>`;
+  }
+  section.innerHTML = html;
+  show(section);
+
+  // Bind add
+  const addSel = document.getElementById('tzLinkAddSelect');
+  if (addSel) addSel.addEventListener('change', async () => {
+    if (!addSel.value) return;
+    const newLinks = [...links, addSel.value];
+    try {
+      await api(`/api/tz/${tzId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: state.pin, linked_tz_ids: newLinks }) });
+      openTzDetail(tzId);
+    } catch (err) { showToast(err.message, 'danger'); }
+  });
+  // Bind remove
+  section.querySelectorAll('.tz-link-remove').forEach((btn) => {
+    btn.addEventListener('click', async (e) => {
+      e.stopPropagation();
+      const newLinks = links.filter((l) => l !== btn.dataset.lid);
+      try {
+        await api(`/api/tz/${tzId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: state.pin, linked_tz_ids: newLinks }) });
+        openTzDetail(tzId);
+      } catch (err) { showToast(err.message, 'danger'); }
+    });
+  });
+  // Bind chip click to navigate
+  section.querySelectorAll('.tz-link-chip-text').forEach((el) => {
+    el.addEventListener('click', () => openTzDetail(el.dataset.tzId));
+  });
 }
 
 // TZ form submit
@@ -3511,6 +3718,278 @@ kbCategoriesCloseBtn.addEventListener('click', () => {
 });
 kbCategoriesPopup.addEventListener('click', (e) => { if (e.target === kbCategoriesPopup) { hide(kbCategoriesPopup); if (state.kbView === 'categories') loadKbView(); } });
 
+/* ── TZ Templates ── */
+
+async function loadTzTemplates() {
+  if (state.adminRole !== 'superadmin') return;
+  try {
+    state.tzTemplates = await api(`/api/tz-templates?pin=${encodeURIComponent(state.pin)}`);
+  } catch { state.tzTemplates = []; }
+}
+
+/* ── Global Search ── */
+
+function initGlobalSearch() {
+  if (!globalSearchInput) return;
+  globalSearchInput.addEventListener('input', () => {
+    clearTimeout(_globalSearchTimer);
+    const q = globalSearchInput.value.trim();
+    if (q.length < 2) { hide(globalSearchResults); return; }
+    _globalSearchTimer = setTimeout(() => performGlobalSearch(q), 300);
+  });
+  globalSearchInput.addEventListener('focus', () => {
+    if (globalSearchInput.value.trim().length >= 2) performGlobalSearch(globalSearchInput.value.trim());
+  });
+  document.addEventListener('click', (e) => {
+    if (!e.target.closest('#globalSearchWrap')) hide(globalSearchResults);
+  });
+}
+
+async function performGlobalSearch(q) {
+  try {
+    const results = await api(`/api/search?pin=${encodeURIComponent(state.pin)}&q=${encodeURIComponent(q)}`);
+    let html = '';
+    if (results.tz.length) {
+      html += '<div class="gs-section"><div class="gs-section-title">ТЗ</div>';
+      for (const t of results.tz) {
+        html += `<div class="gs-item gs-item-tz" data-tz-id="${esc(t.id)}"><span class="gs-code">${esc(t.tz_code)}</span> ${esc(t.title)}</div>`;
+      }
+      html += '</div>';
+    }
+    if (results.kb.length) {
+      html += '<div class="gs-section"><div class="gs-section-title">База знаний</div>';
+      for (const a of results.kb) {
+        html += `<div class="gs-item gs-item-kb" data-kb-id="${esc(a.id)}" data-cat-id="${esc(a.category_id)}">${esc(a.title)}</div>`;
+      }
+      html += '</div>';
+    }
+    if (results.tickets.length) {
+      html += '<div class="gs-section"><div class="gs-section-title">ИТ-заявки</div>';
+      for (const t of results.tickets) {
+        html += `<div class="gs-item gs-item-ticket">${esc(t.category)} — ${esc(t.description)}</div>`;
+      }
+      html += '</div>';
+    }
+    if (!html) html = '<div class="gs-empty">Ничего не найдено</div>';
+    globalSearchResults.innerHTML = html;
+    show(globalSearchResults);
+
+    // Bind clicks
+    globalSearchResults.querySelectorAll('.gs-item-tz').forEach((el) => {
+      el.addEventListener('click', () => { hide(globalSearchResults); globalSearchInput.value = ''; switchToTab('tz'); setTimeout(() => openTzDetail(el.dataset.tzId), 300); });
+    });
+    globalSearchResults.querySelectorAll('.gs-item-kb').forEach((el) => {
+      el.addEventListener('click', () => { hide(globalSearchResults); globalSearchInput.value = ''; state.kbView = 'article'; state.kbArticleId = el.dataset.kbId; state.kbCategoryId = el.dataset.catId; switchToTab('kb'); });
+    });
+  } catch { hide(globalSearchResults); }
+}
+
+/* ── Team Directory ── */
+
+async function loadTeamMembers() {
+  if (!state.pin) return;
+  try {
+    const members = await api(`/api/team/members?pin=${encodeURIComponent(state.pin)}`);
+    state.teamMembers = members;
+    renderTeamGrid(members);
+  } catch (err) {
+    msg(teamMessage, err.message, 'error');
+  }
+}
+
+function renderTeamGrid(members) {
+  if (!teamGrid) return;
+  if (!members.length) { teamGrid.innerHTML = '<p class="team-empty">Нет сотрудников</p>'; return; }
+  teamGrid.innerHTML = members.map((m) => {
+    const avatar = m.avatar ? `/api/avatars/${esc(m.avatar)}` : DEFAULT_AVATAR;
+    const loc = m.workLocation ? `<span class="team-location">${esc(m.workLocation)}${m.workDesk ? ', стол ' + esc(String(m.workDesk)) : ''}</span>` : '';
+    return `<div class="team-card" data-user-id="${esc(m.id)}">
+      <img class="team-avatar" src="${avatar}" alt="" />
+      <div class="team-info">
+        <div class="team-name">${esc(m.fullName)}</div>
+        ${m.position ? `<div class="team-position">${esc(m.position)}</div>` : ''}
+        ${loc}
+        ${m.contact ? `<div class="team-contact">${esc(m.contact)}</div>` : ''}
+      </div>
+    </div>`;
+  }).join('');
+}
+
+function initTeamSearch() {
+  if (!teamSearchInput) return;
+  teamSearchInput.addEventListener('input', () => {
+    const q = teamSearchInput.value.trim().toLowerCase();
+    if (!q) { renderTeamGrid(state.teamMembers); return; }
+    const filtered = state.teamMembers.filter((m) =>
+      m.fullName.toLowerCase().includes(q) || (m.position || '').toLowerCase().includes(q) || (m.workLocation || '').toLowerCase().includes(q)
+    );
+    renderTeamGrid(filtered);
+  });
+}
+
+/* ── TZ Task Links ── */
+
+function renderTzLinks(tz, allTzList) {
+  const links = tz.linked_tz_ids || [];
+  let html = '<div class="tz-links-section"><h4>Связанные задачи</h4>';
+  if (links.length) {
+    html += '<div class="tz-links-list">';
+    for (const lid of links) {
+      const linked = allTzList ? allTzList.find((t) => t.id === lid) : null;
+      if (linked) {
+        html += `<span class="tz-link-chip" data-tz-id="${esc(lid)}">${esc(linked.tz_code)} — ${esc(linked.title.slice(0, 40))}<button class="tz-link-remove" data-lid="${esc(lid)}" title="Убрать">&times;</button></span>`;
+      }
+    }
+    html += '</div>';
+  }
+  if (state.adminRole === 'superadmin') {
+    html += `<div class="tz-link-add-row"><select id="tzLinkAddSelect"><option value="">+ Добавить связь...</option></select></div>`;
+  }
+  html += '</div>';
+  return html;
+}
+
+/* ── Metrics Dashboard ── */
+
+let _metricsChartInstances = [];
+
+async function loadMetrics() {
+  if (state.adminRole !== 'superadmin') return;
+  const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
+  try {
+    const data = await api('/api/admin/tz-metrics', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, ...boardPayload })
+    });
+    renderMetrics(data);
+  } catch (err) {
+    msg(metricsMessage, err.message, 'error');
+  }
+}
+
+function renderMetrics(data) {
+  if (!metricsContent) return;
+  // Destroy old chart instances
+  _metricsChartInstances.forEach((c) => c.destroy());
+  _metricsChartInstances = [];
+
+  metricsContent.innerHTML = `
+    <div class="metrics-summary">
+      <div class="metrics-card"><div class="metrics-num">${data.total}</div><div class="metrics-label">Всего ТЗ</div></div>
+      <div class="metrics-card"><div class="metrics-num">${data.totalDone}</div><div class="metrics-label">Завершено</div></div>
+      <div class="metrics-card"><div class="metrics-num">${data.avgCycleTime}д</div><div class="metrics-label">Ср. цикл</div></div>
+    </div>
+    <div class="metrics-charts">
+      <div class="metrics-chart-wrap"><h4>Созданы по неделям</h4><canvas id="chartCreatedPerWeek"></canvas></div>
+      <div class="metrics-chart-wrap"><h4>По статусам</h4><canvas id="chartStatus"></canvas></div>
+      <div class="metrics-chart-wrap"><h4>По приоритетам</h4><canvas id="chartPriority"></canvas></div>
+      <div class="metrics-chart-wrap"><h4>По типам</h4><canvas id="chartType"></canvas></div>
+    </div>`;
+
+  if (typeof Chart === 'undefined') return;
+
+  const colors = ['#3b82f6', '#10b981', '#f59e0b', '#ef4444', '#8b5cf6', '#06b6d4', '#ec4899', '#84cc16'];
+
+  // Created per week (bar chart)
+  const ctxWeek = document.getElementById('chartCreatedPerWeek');
+  if (ctxWeek) {
+    _metricsChartInstances.push(new Chart(ctxWeek, {
+      type: 'bar',
+      data: {
+        labels: data.createdPerWeek.map((w) => w.label),
+        datasets: [{ label: 'Создано', data: data.createdPerWeek.map((w) => w.count), backgroundColor: '#3b82f6' }]
+      },
+      options: { responsive: true, plugins: { legend: { display: false } }, scales: { y: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+    }));
+  }
+
+  // Status distribution (doughnut)
+  const ctxStatus = document.getElementById('chartStatus');
+  if (ctxStatus) {
+    const labels = Object.keys(data.statusCounts);
+    const vals = Object.values(data.statusCounts);
+    _metricsChartInstances.push(new Chart(ctxStatus, {
+      type: 'doughnut',
+      data: { labels: labels.map((s) => getBoardStatusLabel(s)), datasets: [{ data: vals, backgroundColor: colors.slice(0, labels.length) }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+    }));
+  }
+
+  // Priority (doughnut)
+  const ctxPrio = document.getElementById('chartPriority');
+  if (ctxPrio) {
+    const prioColors = { low: '#10b981', medium: '#f59e0b', high: '#f97316', critical: '#ef4444' };
+    const labels = Object.keys(data.prioCounts);
+    const vals = Object.values(data.prioCounts);
+    _metricsChartInstances.push(new Chart(ctxPrio, {
+      type: 'doughnut',
+      data: { labels: labels.map((p) => TZ_PRIO_LABELS[p] || p), datasets: [{ data: vals, backgroundColor: labels.map((p) => prioColors[p] || '#94a3b8') }] },
+      options: { responsive: true, plugins: { legend: { position: 'bottom', labels: { boxWidth: 12 } } } }
+    }));
+  }
+
+  // Type (bar)
+  const ctxType = document.getElementById('chartType');
+  if (ctxType) {
+    const labels = Object.keys(data.typeCounts);
+    const vals = Object.values(data.typeCounts);
+    _metricsChartInstances.push(new Chart(ctxType, {
+      type: 'bar',
+      data: { labels, datasets: [{ label: 'Кол-во', data: vals, backgroundColor: colors.slice(0, labels.length) }] },
+      options: { responsive: true, indexAxis: 'y', plugins: { legend: { display: false } }, scales: { x: { beginAtZero: true, ticks: { stepSize: 1 } } } }
+    }));
+  }
+}
+
+/* ── Kanban Swimlanes ── */
+
+function renderKanbanSwimlanes(data, swimlaneType) {
+  if (!data.swimlanes || !data.swimlanes.length) {
+    renderKanban(data);
+    return;
+  }
+  if (!tzListContainer) return;
+  const { transitions, statusLabels, boardColumns, swimlanes } = data;
+  const displayOrder = boardColumns
+    ? boardColumns.filter((c) => !c.hidden).sort((a, b) => a.order - b.order).map((c) => c.id)
+    : Object.keys(data.columns);
+  const colorMap = boardColumns
+    ? Object.fromEntries(boardColumns.map((c) => [c.id, c.color]))
+    : {};
+
+  let html = '<div class="kanban-swimlane-board">';
+  // Header row
+  html += '<div class="kanban-swimlane-header"><div class="kanban-sl-label"></div>';
+  for (const status of displayOrder) {
+    const color = colorMap[status] || '#edf2f7';
+    html += `<div class="kanban-sl-col-header" style="background:${color}">${esc(statusLabels[status] || status)}</div>`;
+  }
+  html += '</div>';
+
+  for (const sl of swimlanes) {
+    html += `<div class="kanban-swimlane-row"><div class="kanban-sl-label">${esc(sl.label)}</div>`;
+    for (const status of displayOrder) {
+      const cards = sl.columns[status] || [];
+      html += `<div class="kanban-sl-cell" data-status="${esc(status)}">`;
+      for (const tz of cards) {
+        html += `<div class="kanban-card kanban-card-mini" data-tz-id="${esc(tz.id)}" data-status="${esc(tz.status)}">
+          <div class="kanban-card-prio kanban-prio-${esc(tz.priority)}"></div>
+          <div class="kanban-card-body"><div class="kanban-card-code">${esc(tz.tz_code)}</div><div class="kanban-card-title">${esc(tz.title)}</div></div>
+        </div>`;
+      }
+      html += '</div>';
+    }
+    html += '</div>';
+  }
+  html += '</div>';
+  tzListContainer.innerHTML = html;
+
+  tzListContainer.querySelectorAll('.kanban-card').forEach((card) => {
+    card.addEventListener('click', () => openTzDetail(card.dataset.tzId));
+  });
+}
+
 /* ── AI Agent ── */
 
 function startAiRefresh() {
@@ -3617,6 +4096,8 @@ if (itStatusMatch) {
     const loggedIn = await tryAutoLogin();
     if (loggedIn) {
       showMain(); await loadApp(); showTzNotifications();
+      initGlobalSearch();
+      initTeamSearch();
       await restoreFromHash();
     }
     else { showAuth(); }

@@ -1033,6 +1033,13 @@ button{
 .tz-watch-btn.watching{background:var(--accent);color:#fff;border-color:var(--accent)}
 .tz-watch-btn.watching:hover{opacity:.85}
 
+/* ── TZ Bulk ── */
+.tz-bulk-bar{display:flex;align-items:center;gap:8px;padding:8px 12px;background:#edf2f7;border-radius:8px;margin-bottom:8px;flex-wrap:wrap}
+.tz-bulk-bar span{font-size:13px;font-weight:600;color:var(--text)}
+.tz-bulk-bar select{font-size:12px;padding:4px 8px;border-radius:6px;border:1px solid var(--border)}
+.tz-cb-th,.tz-cb-td{width:32px;text-align:center;padding:4px!important}
+.tz-cb-td input,.tz-cb-th input{cursor:pointer}
+
 .tz-empty{text-align:center;color:var(--disabled);padding:32px 0;font-size:14px}
 
 /* TZ export button */
@@ -1412,6 +1419,127 @@ button{
   padding:6px 14px;font-size:13px;border-radius:8px;cursor:pointer;transition:all .2s;
 }
 .btn-danger-outline:hover{background:var(--danger-soft)}
+
+/* ── Global Search ── */
+.topbar-center{flex:1;max-width:400px;margin:0 16px}
+.global-search-wrap{position:relative}
+.global-search-icon{position:absolute;left:10px;top:50%;transform:translateY(-50%);color:var(--text-sec);pointer-events:none}
+.global-search-input{
+  width:100%;padding:8px 12px 8px 34px;border:1.5px solid var(--border);border-radius:10px;
+  font:inherit;font-size:14px;background:#f7f9fc;transition:border-color .2s;
+}
+.global-search-input:focus{outline:none;border-color:var(--accent);background:#fff}
+.global-search-results{
+  position:absolute;top:100%;left:0;right:0;max-height:400px;overflow-y:auto;
+  background:#fff;border:1.5px solid var(--border);border-radius:10px;
+  box-shadow:0 8px 30px rgba(0,0,0,.12);z-index:100;margin-top:4px;
+}
+.gs-section{padding:4px 0}
+.gs-section-title{padding:6px 14px;font-size:11px;font-weight:600;color:var(--text-sec);text-transform:uppercase;letter-spacing:.5px}
+.gs-item{padding:8px 14px;cursor:pointer;font-size:14px;transition:background .15s}
+.gs-item:hover{background:#f0f4ff}
+.gs-code{color:var(--accent);font-weight:600;margin-right:6px}
+.gs-empty{padding:16px;text-align:center;color:var(--text-sec);font-size:14px}
+@media(max-width:640px){.topbar-center{display:none}}
+
+/* ── Team Directory ── */
+.team-search-wrap{margin-bottom:16px}
+.team-search-input{
+  width:100%;padding:10px 14px;border:1.5px solid var(--border);border-radius:10px;
+  font:inherit;font-size:14px;
+}
+.team-search-input:focus{outline:none;border-color:var(--accent)}
+.team-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(280px,1fr));gap:14px}
+.team-card{
+  display:flex;gap:14px;padding:16px;background:#fff;border:1.5px solid var(--border);
+  border-radius:12px;transition:box-shadow .2s;
+}
+.team-card:hover{box-shadow:0 4px 16px rgba(0,0,0,.06)}
+.team-avatar{width:52px;height:52px;border-radius:50%;object-fit:cover;flex-shrink:0}
+.team-info{min-width:0}
+.team-name{font-weight:600;font-size:15px;color:var(--text-main)}
+.team-position{font-size:13px;color:var(--text-sec);margin-top:2px}
+.team-location{font-size:12px;color:var(--accent);display:block;margin-top:2px}
+.team-contact{font-size:12px;color:var(--text-sec);margin-top:4px;word-break:break-all}
+.team-empty{text-align:center;color:var(--text-sec);padding:40px}
+
+/* ── TZ Templates ── */
+.tz-template-row{
+  display:flex;align-items:flex-end;gap:8px;margin-bottom:12px;padding:10px 12px;
+  background:#f0f4ff;border-radius:10px;border:1.5px dashed var(--accent);
+}
+.tz-template-row label{flex:1;margin:0}
+.tz-template-row select{
+  width:100%;padding:6px 10px;border:1.5px solid var(--border);border-radius:8px;font:inherit;font-size:14px;
+}
+
+/* ── TZ Linked Tasks ── */
+.tz-links-section{margin-top:16px;padding-top:12px;border-top:1px solid var(--border)}
+.tz-links-section h4{margin:0 0 8px;font-size:14px;color:var(--text-sec)}
+.tz-links-list{display:flex;flex-wrap:wrap;gap:6px;margin-bottom:8px}
+.tz-link-chip{
+  display:inline-flex;align-items:center;gap:4px;padding:4px 10px;
+  background:#edf2f7;border-radius:8px;font-size:13px;cursor:pointer;
+}
+.tz-link-chip:hover{background:#dbeafe}
+.tz-link-chip-text{cursor:pointer;color:var(--accent)}
+.tz-link-remove{
+  background:none;border:none;cursor:pointer;color:var(--danger);font-size:16px;
+  padding:0 2px;line-height:1;
+}
+.tz-link-add-select{
+  width:100%;max-width:300px;padding:6px 10px;border:1.5px solid var(--border);
+  border-radius:8px;font:inherit;font-size:13px;color:var(--text-sec);
+}
+.tz-links-empty{margin:0 0 8px;font-size:13px;color:var(--disabled)}
+
+/* ── Kanban Swimlanes ── */
+.tz-swimlane-select{max-width:160px}
+.kanban-swimlane-board{overflow-x:auto}
+.kanban-swimlane-header{
+  display:flex;position:sticky;top:0;z-index:2;background:#fff;
+}
+.kanban-sl-label{
+  min-width:120px;max-width:120px;flex-shrink:0;padding:8px;font-weight:600;
+  font-size:13px;color:var(--text-sec);display:flex;align-items:center;
+}
+.kanban-sl-col-header{
+  min-width:180px;flex:1;padding:8px 10px;text-align:center;font-size:12px;
+  font-weight:600;color:#fff;border-radius:8px 8px 0 0;margin:0 3px;
+}
+.kanban-swimlane-row{
+  display:flex;border-bottom:1px solid var(--border);min-height:80px;
+}
+.kanban-sl-cell{
+  min-width:180px;flex:1;padding:4px;margin:0 3px;background:#f7f9fc;
+  display:flex;flex-direction:column;gap:4px;
+}
+.kanban-card-mini{padding:6px 8px}
+.kanban-card-mini .kanban-card-title{font-size:12px;-webkit-line-clamp:1}
+.kanban-card-mini .kanban-card-code{font-size:11px}
+
+/* ── Metrics Dashboard ── */
+.metrics-summary{
+  display:flex;gap:14px;margin-bottom:20px;flex-wrap:wrap;
+}
+.metrics-card{
+  flex:1;min-width:120px;padding:16px;background:#f7f9fc;border-radius:12px;
+  text-align:center;border:1.5px solid var(--border);
+}
+.metrics-num{font-size:28px;font-weight:700;color:var(--accent)}
+.metrics-label{font-size:12px;color:var(--text-sec);margin-top:4px}
+.metrics-charts{
+  display:grid;grid-template-columns:1fr 1fr;gap:20px;
+}
+.metrics-chart-wrap{
+  padding:16px;background:#fff;border:1.5px solid var(--border);border-radius:12px;
+}
+.metrics-chart-wrap h4{margin:0 0 12px;font-size:14px;color:var(--text-main)}
+.metrics-chart-wrap canvas{max-height:250px}
+@media(max-width:700px){
+  .metrics-charts{grid-template-columns:1fr}
+  .metrics-summary{flex-direction:column}
+}
 
 /* ── Touch-friendly: min tap target 44px ── */
 @media(pointer:coarse){
