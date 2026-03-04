@@ -223,18 +223,105 @@ function avatarUrl(avatar) {
 
 /* ── Tabs ── */
 
+// Hash routing: #tab, #wiki/категория, #wiki/категория/статья
+function toSlug(text) {
+  return (text || '').trim().toLowerCase()
+    .replace(/\s+/g, '-').replace(/[^\wа-яё\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '')
+    .slice(0, 60);
+}
+
+function parseHash() {
+  const h = decodeURIComponent(location.hash.replace('#', ''));
+  if (!h) return {};
+  const parts = h.split('/');
+  const result = { tab: parts[0] };
+  // #wiki or #wiki/cat-slug or #wiki/cat-slug/article-slug
+  if (parts[0] === 'wiki') {
+    result.tab = 'kb';
+    if (parts[1]) result.kbCatSlug = parts[1];
+    if (parts[2]) result.kbArticleSlug = parts[2];
+  }
+  // Legacy: #kb/cat/UUID or #kb/article/UUID
+  if (parts[0] === 'kb' && parts[1] === 'cat' && parts[2]) {
+    result.tab = 'kb';
+    result.kbCategoryId = parts[2];
+  } else if (parts[0] === 'kb' && parts[1] === 'article' && parts[2]) {
+    result.tab = 'kb';
+    result.kbArticleId = parts[2];
+  }
+  if (parts[0] === 'tz' && parts[1] === 'kanban') result.tzKanban = true;
+  return result;
+}
+
+function switchToTab(tabName, updateHash) {
+  const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
+  if (!tab || tab.style.display === 'none') return false;
+  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
+  tab.classList.add('active');
+  const panelName = tabName.charAt(0).toUpperCase() + tabName.slice(1);
+  $('panel' + panelName).classList.add('active');
+  if (tabName === 'tz') loadTzData();
+  if (tabName === 'kb') loadKbView();
+  if (tabName === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
+  if (updateHash !== false) location.hash = tabName === 'kb' ? 'wiki' : tabName;
+  return true;
+}
+
+function updateHash(hash) {
+  history.replaceState(null, '', '#' + hash);
+}
+
 document.querySelectorAll('.tab').forEach((tab) => {
-  tab.addEventListener('click', () => {
-    document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
-    document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
-    tab.classList.add('active');
-    const panelName = tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1);
-    $('panel' + panelName).classList.add('active');
-    if (tab.dataset.tab === 'tz') loadTzData();
-    if (tab.dataset.tab === 'kb') loadKbView();
-    if (tab.dataset.tab === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
-  });
+  tab.addEventListener('click', () => switchToTab(tab.dataset.tab));
 });
+
+async function restoreFromHash() {
+  const h = parseHash();
+  if (!h.tab) return;
+  if (h.tab === 'kb' && h.kbArticleId) {
+    // Legacy UUID link: #kb/article/UUID
+    switchToTab('kb', false);
+    state.kbView = 'article';
+    state.kbArticleId = h.kbArticleId;
+    await loadKbView();
+  } else if (h.tab === 'kb' && h.kbCategoryId) {
+    // Legacy UUID link: #kb/cat/UUID
+    switchToTab('kb', false);
+    state.kbView = 'articles';
+    state.kbCategoryId = h.kbCategoryId;
+    await loadKbView();
+  } else if (h.tab === 'kb' && (h.kbCatSlug || h.kbArticleSlug)) {
+    switchToTab('kb', false);
+    // Load categories to resolve slug → id
+    try {
+      const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+      state.kbCategories = cats;
+      const cat = cats.find((c) => toSlug(c.name) === h.kbCatSlug);
+      if (cat && h.kbArticleSlug) {
+        const articles = await api(`/api/kb/articles?pin=${encodeURIComponent(state.pin)}&category_id=${encodeURIComponent(cat.id)}`);
+        const art = articles.find((a) => toSlug(a.title) === h.kbArticleSlug);
+        if (art) {
+          state.kbView = 'article';
+          state.kbArticleId = art.id;
+          state.kbCategoryId = cat.id;
+        } else {
+          state.kbView = 'articles';
+          state.kbCategoryId = cat.id;
+        }
+      } else if (cat) {
+        state.kbView = 'articles';
+        state.kbCategoryId = cat.id;
+      }
+    } catch { /* fallback to categories */ }
+    await loadKbView();
+  } else if (h.tab === 'tz' && h.tzKanban) {
+    state.tzViewMode = 'kanban';
+    switchToTab('tz', false);
+  } else {
+    switchToTab(h.tab, false);
+  }
+}
 
 /* ── Auth ── */
 
@@ -1728,6 +1815,7 @@ function renderTzFilters() {
       const panel = document.getElementById('panelTz');
       if (btn.dataset.view === 'kanban') panel.classList.add('kanban-active');
       else panel.classList.remove('kanban-active');
+      updateHash(btn.dataset.view === 'kanban' ? 'tz/kanban' : 'tz');
       loadTzData();
     });
   });
@@ -2303,7 +2391,7 @@ async function renderKbCategories() {
     }
 
     kbContent.innerHTML = '<div class="kb-categories-grid">' + cats.map((c) => `
-      <div class="kb-category-card" data-cat-id="${esc(c.id)}">
+      <div class="kb-category-card" data-cat-id="${esc(c.id)}" data-cat-slug="${esc(toSlug(c.name))}">
         <div class="kb-cat-icon">${kbIcon(c.icon)}</div>
         <div class="kb-cat-name">${esc(c.name)}</div>
         <div class="kb-cat-count">${c.articleCount} ${kbPlural(c.articleCount, 'статья', 'статьи', 'статей')}</div>
@@ -2314,6 +2402,7 @@ async function renderKbCategories() {
       card.addEventListener('click', () => {
         state.kbView = 'articles';
         state.kbCategoryId = card.dataset.catId;
+        updateHash(`wiki/${card.dataset.catSlug}`);
         loadKbView();
       });
     });
@@ -2347,10 +2436,13 @@ async function renderKbArticles() {
   const catName = cat ? cat.name : 'Статьи';
   const isSuperadmin = state.adminRole === 'superadmin';
 
+  if (cat) updateHash(`wiki/${toSlug(catName)}`);
+
   kbBreadcrumbs.innerHTML = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a> <span class="kb-crumb-sep">/</span> <span class="kb-crumb-current">${esc(catName)}</span>`;
   document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
     e.preventDefault();
     state.kbView = 'categories';
+    updateHash('wiki');
     loadKbView();
   });
 
@@ -2379,6 +2471,7 @@ function renderKbArticleList(articles, title, isSearch) {
     document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
       e.preventDefault();
       state.kbView = 'categories';
+      updateHash('wiki');
       loadKbView();
     });
   }
@@ -2388,18 +2481,26 @@ function renderKbArticleList(articles, title, isSearch) {
     return;
   }
 
-  kbContent.innerHTML = '<div class="kb-article-list">' + articles.map((a) => `
-    <div class="kb-article-card" data-article-id="${esc(a.id)}">
+  const curCat = state.kbCategories.find((c) => c.id === state.kbCategoryId);
+  const catSlug = curCat ? toSlug(curCat.name) : '';
+
+  kbContent.innerHTML = '<div class="kb-article-list">' + articles.map((a) => {
+    const artCat = a.category_id ? state.kbCategories.find((c) => c.id === a.category_id) : curCat;
+    const artCatSlug = artCat ? toSlug(artCat.name) : catSlug;
+    return `
+    <div class="kb-article-card" data-article-id="${esc(a.id)}" data-cat-slug="${esc(artCatSlug)}" data-art-slug="${esc(toSlug(a.title))}">
       ${a.pinned ? '<span class="kb-pinned-badge">&#x1F4CC;</span>' : ''}
       <div class="kb-article-card-title">${esc(a.title)}</div>
       <div class="kb-article-card-meta">${esc(a.created_by)} &middot; ${fmtDate(a.updated_at)}</div>
-    </div>
-  `).join('') + '</div>';
+    </div>`;
+  }).join('') + '</div>';
 
   kbContent.querySelectorAll('.kb-article-card').forEach((card) => {
     card.addEventListener('click', () => {
       state.kbView = 'article';
       state.kbArticleId = card.dataset.articleId;
+      const slug = card.dataset.catSlug ? `wiki/${card.dataset.catSlug}/${card.dataset.artSlug}` : `wiki/${card.dataset.artSlug}`;
+      updateHash(slug);
       loadKbView();
     });
   });
@@ -2414,6 +2515,11 @@ async function renderKbArticle() {
     const cat = state.kbCategories.find((c) => c.id === article.category_id);
     const catName = cat ? cat.name : '';
 
+    // Update hash to canonical slug URL
+    if (catName) {
+      updateHash(`wiki/${toSlug(catName)}/${toSlug(article.title)}`);
+    }
+
     let crumbs = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a>`;
     if (catName) {
       crumbs += ` <span class="kb-crumb-sep">/</span> <a href="#" class="kb-crumb" id="kbCrumbCat">${esc(catName)}</a>`;
@@ -2424,12 +2530,14 @@ async function renderKbArticle() {
     document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
       e.preventDefault();
       state.kbView = 'categories';
+      updateHash('wiki');
       loadKbView();
     });
     document.getElementById('kbCrumbCat')?.addEventListener('click', (e) => {
       e.preventDefault();
       state.kbView = 'articles';
       state.kbCategoryId = article.category_id;
+      updateHash(`wiki/${toSlug(catName)}`);
       loadKbView();
     });
 
@@ -2839,7 +2947,10 @@ if (itStatusMatch) {
 
   (async () => {
     const loggedIn = await tryAutoLogin();
-    if (loggedIn) { showMain(); await loadApp(); showTzNotifications(); }
+    if (loggedIn) {
+      showMain(); await loadApp(); showTzNotifications();
+      await restoreFromHash();
+    }
     else { showAuth(); }
   })();
 }
