@@ -3739,17 +3739,23 @@ async function loadTzTemplates() {
 
 /* ── Global Search ── */
 
+function closeGlobalSearch() {
+  globalSearchInput.classList.remove('expanded');
+  globalSearchInput.value = '';
+  hide(globalSearchResults);
+}
+
 function initGlobalSearch() {
   if (!globalSearchInput) return;
   const toggleBtn = $('globalSearchToggle');
   if (toggleBtn) {
     toggleBtn.addEventListener('click', () => {
-      globalSearchInput.classList.toggle('hidden');
-      if (!globalSearchInput.classList.contains('hidden')) {
-        globalSearchInput.focus();
+      const isOpen = globalSearchInput.classList.contains('expanded');
+      if (isOpen) {
+        closeGlobalSearch();
       } else {
-        globalSearchInput.value = '';
-        hide(globalSearchResults);
+        globalSearchInput.classList.add('expanded');
+        globalSearchInput.focus();
       }
     });
   }
@@ -3760,10 +3766,15 @@ function initGlobalSearch() {
     _globalSearchTimer = setTimeout(() => performGlobalSearch(q), 300);
   });
   globalSearchInput.addEventListener('keydown', (e) => {
-    if (e.key === 'Escape') { globalSearchInput.value = ''; hide(globalSearchResults); globalSearchInput.classList.add('hidden'); }
+    if (e.key === 'Escape') closeGlobalSearch();
+  });
+  globalSearchInput.addEventListener('blur', () => {
+    setTimeout(() => {
+      if (!globalSearchInput.matches(':focus') && !globalSearchResults.matches(':hover')) closeGlobalSearch();
+    }, 200);
   });
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('#globalSearchWrap')) { hide(globalSearchResults); globalSearchInput.classList.add('hidden'); globalSearchInput.value = ''; }
+    if (!e.target.closest('#globalSearchWrap')) closeGlobalSearch();
   });
 }
 
