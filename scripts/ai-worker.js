@@ -105,7 +105,7 @@ async function sendTzDigest() {
     text += '\n✅ Все дедлайны в порядке\n';
   }
 
-  text += `\n📊 Всего ТЗ: ${allTz.length} | В работе: ${inWork} | Завершено: ${statusCounts.production || 0} | Частично: ${statusCounts.partial || 0} | Черновик: ${statusCounts.draft || 0}`;
+  text += `\n📊 Всего ТЗ: ${allTz.length} | В работе: ${inWork} | Завершено: ${statusCounts.production || 0} | Прод (частично): ${statusCounts.partial || 0} | Черновик: ${statusCounts.draft || 0}`;
 
   for (const id of adminIds) {
     await sendTelegram(id, text);

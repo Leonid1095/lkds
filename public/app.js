@@ -223,7 +223,7 @@ function avatarUrl(avatar) {
 
 /* ── Tabs ── */
 
-// Hash routing: #tab, #wiki/категория, #wiki/категория/статья
+// Hash routing: #tab, #w/категория, #w/категория/статья
 function toSlug(text) {
   return (text || '').trim().toLowerCase()
     .replace(/\s+/g, '-').replace(/[^\wа-яё\-]/g, '').replace(/-+/g, '-').replace(/^-|-$/g, '')
@@ -235,8 +235,8 @@ function parseHash() {
   if (!h) return {};
   const parts = h.split('/');
   const result = { tab: parts[0] };
-  // #wiki or #wiki/cat-slug or #wiki/cat-slug/article-slug
-  if (parts[0] === 'wiki') {
+  // #w or #w/cat-slug or #w/cat-slug/article-slug (legacy: #wiki/...)
+  if (parts[0] === 'w' || parts[0] === 'wiki') {
     result.tab = 'kb';
     if (parts[1]) result.kbCatSlug = parts[1];
     if (parts[2]) result.kbArticleSlug = parts[2];
@@ -264,7 +264,7 @@ function switchToTab(tabName, updateHash) {
   if (tabName === 'tz') loadTzData();
   if (tabName === 'kb') loadKbView();
   if (tabName === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
-  if (updateHash !== false) location.hash = tabName === 'kb' ? 'wiki' : tabName;
+  if (updateHash !== false) location.hash = tabName === 'kb' ? 'w' : tabName;
   return true;
 }
 
@@ -395,6 +395,7 @@ loginForm.addEventListener('submit', async (e) => {
     showMain();
     await loadApp();
     showTzNotifications();
+    await restoreFromHash();
   } catch (err) {
     msg(loginMessage, err.message, 'error');
   }
@@ -417,7 +418,7 @@ registerForm.addEventListener('submit', async (e) => {
     localStorage.setItem('lkds_pin', data.pin);
     msg(registerMessage, 'Регистрация прошла успешно!', 'success');
     registerForm.reset();
-    setTimeout(() => { showMain(); loadApp(); }, 1500);
+    setTimeout(async () => { showMain(); await loadApp(); await restoreFromHash(); }, 1500);
   } catch (err) {
     msg(registerMessage, err.message, 'error');
   }
@@ -2402,7 +2403,7 @@ async function renderKbCategories() {
       card.addEventListener('click', () => {
         state.kbView = 'articles';
         state.kbCategoryId = card.dataset.catId;
-        updateHash(`wiki/${card.dataset.catSlug}`);
+        updateHash(`w/${card.dataset.catSlug}`);
         loadKbView();
       });
     });
@@ -2436,13 +2437,13 @@ async function renderKbArticles() {
   const catName = cat ? cat.name : 'Статьи';
   const isSuperadmin = state.adminRole === 'superadmin';
 
-  if (cat) updateHash(`wiki/${toSlug(catName)}`);
+  if (cat) updateHash(`w/${toSlug(catName)}`);
 
   kbBreadcrumbs.innerHTML = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a> <span class="kb-crumb-sep">/</span> <span class="kb-crumb-current">${esc(catName)}</span>`;
   document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
     e.preventDefault();
     state.kbView = 'categories';
-    updateHash('wiki');
+    updateHash('w');
     loadKbView();
   });
 
@@ -2471,7 +2472,7 @@ function renderKbArticleList(articles, title, isSearch) {
     document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
       e.preventDefault();
       state.kbView = 'categories';
-      updateHash('wiki');
+      updateHash('w');
       loadKbView();
     });
   }
@@ -2499,7 +2500,7 @@ function renderKbArticleList(articles, title, isSearch) {
     card.addEventListener('click', () => {
       state.kbView = 'article';
       state.kbArticleId = card.dataset.articleId;
-      const slug = card.dataset.catSlug ? `wiki/${card.dataset.catSlug}/${card.dataset.artSlug}` : `wiki/${card.dataset.artSlug}`;
+      const slug = card.dataset.catSlug ? `w/${card.dataset.catSlug}/${card.dataset.artSlug}` : `w/${card.dataset.artSlug}`;
       updateHash(slug);
       loadKbView();
     });
@@ -2517,7 +2518,7 @@ async function renderKbArticle() {
 
     // Update hash to canonical slug URL
     if (catName) {
-      updateHash(`wiki/${toSlug(catName)}/${toSlug(article.title)}`);
+      updateHash(`w/${toSlug(catName)}/${toSlug(article.title)}`);
     }
 
     let crumbs = `<a href="#" class="kb-crumb" id="kbCrumbHome">База знаний</a>`;
@@ -2530,14 +2531,14 @@ async function renderKbArticle() {
     document.getElementById('kbCrumbHome')?.addEventListener('click', (e) => {
       e.preventDefault();
       state.kbView = 'categories';
-      updateHash('wiki');
+      updateHash('w');
       loadKbView();
     });
     document.getElementById('kbCrumbCat')?.addEventListener('click', (e) => {
       e.preventDefault();
       state.kbView = 'articles';
       state.kbCategoryId = article.category_id;
-      updateHash(`wiki/${toSlug(catName)}`);
+      updateHash(`w/${toSlug(catName)}`);
       loadKbView();
     });
 

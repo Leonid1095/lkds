@@ -10,7 +10,7 @@ export const TZ_STATUS_LABELS = {
   testing: 'Тестирование',
   release: 'Релиз',
   production: 'В продакшене',
-  partial: 'Частично выполнено',
+  partial: 'В продакшене (частично)',
   cancelled: 'Отменено'
 };
 
