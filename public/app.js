@@ -112,6 +112,11 @@ const tzStatusRow = $('tzStatusRow');
 const tzMeta = $('tzMeta');
 const tzHistorySection = $('tzHistorySection');
 const tzHistoryList = $('tzHistoryList');
+const tzCommentsSection = $('tzCommentsSection');
+const tzCommentsList = $('tzCommentsList');
+const tzCommentsCount = $('tzCommentsCount');
+const tzCommentInput = $('tzCommentInput');
+const tzCommentSendBtn = $('tzCommentSendBtn');
 
 /* ── KB (Wiki) DOM ── */
 const tabKb = $('tabKb');
@@ -187,6 +192,10 @@ const state = {
   kbQuill: null,
   adminPage: {} // { [type]: currentPage }
 };
+
+/* ── Module-scope timers (prevent leaks on re-render) ── */
+let _tzSearchTimer = null;
+let _kbSearchTimer = null;
 
 /* ── Helpers ── */
 
@@ -345,7 +354,7 @@ async function tryAutoLogin() {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: saved })
     });
-    state.pin = data.pin;
+    state.pin = saved;
     state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '',
       workLocation: data.workLocation || '', workDesk: data.workDesk || '' };
     state.userId = data.userId;
@@ -395,14 +404,15 @@ loginForm.addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: pinInput.value.trim() })
     });
-    state.pin = data.pin;
+    const enteredPin = pinInput.value.trim();
+    state.pin = enteredPin;
     state.user = { fullName: data.fullName, contact: data.contact, position: data.position || '',
       workLocation: data.workLocation || '', workDesk: data.workDesk || '' };
     state.userId = data.userId;
     state.isAdmin = !!data.admin;
     state.adminRole = data.adminRole || null;
     state.avatar = data.avatar || '';
-    localStorage.setItem('lkds_pin', data.pin);
+    localStorage.setItem('lkds_pin', enteredPin);
     showMain();
     await loadApp();
     showTzNotifications();
@@ -422,11 +432,12 @@ registerForm.addEventListener('submit', async (e) => {
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(Object.fromEntries(fd.entries()))
     });
-    state.pin = data.pin;
+    const regPin = fd.get('pin');
+    state.pin = regPin;
     state.user = { fullName: data.fullName, contact: data.contact, position: '' };
     state.isAdmin = false;
     state.avatar = '';
-    localStorage.setItem('lkds_pin', data.pin);
+    localStorage.setItem('lkds_pin', regPin);
     msg(registerMessage, 'Регистрация прошла успешно!', 'success');
     registerForm.reset();
     setTimeout(async () => { showMain(); await loadApp(); await restoreFromHash(); }, 1500);
@@ -1865,10 +1876,9 @@ function renderTzFilters() {
 
   const searchEl = document.getElementById('tzFilterSearch');
   if (searchEl) {
-    let searchTimer;
     searchEl.addEventListener('input', () => {
-      clearTimeout(searchTimer);
-      searchTimer = setTimeout(() => { state.tzFilters.search = searchEl.value; loadTzData(); }, 300);
+      clearTimeout(_tzSearchTimer);
+      _tzSearchTimer = setTimeout(() => { state.tzFilters.search = searchEl.value; loadTzData(); }, 300);
     });
   }
 
@@ -2089,6 +2099,7 @@ function openTzCreateForm(presetType) {
   tzForm.reset();
   hide(tzMeta);
   hide(tzHistorySection);
+  hide(tzCommentsSection);
   msg(tzPopupMessage, '');
   hide($('tzApproveRow'));
 
@@ -2253,14 +2264,35 @@ async function openTzDetail(id) {
     };
 
     // Meta info
+    const isWatching = (data.watchers || []).includes(state.userId);
+    const watcherCount = (data.watchers || []).length;
     let metaHtml = `
       <span>Создано: ${fmtDate(data.created_at)}</span>
       <span>Автор: ${esc(data.created_by || '—')}</span>
       <span>Обновлено: ${fmtDate(data.updated_at)}</span>`;
     if (data.assignee_name) metaHtml += `<span>Исполнитель: ${esc(data.assignee_name)}</span>`;
     if (data.assigned_by_name) metaHtml += `<span>Назначил: ${esc(data.assigned_by_name)}</span>`;
+    if (isSA) {
+      metaHtml += `<button type="button" class="tz-watch-btn${isWatching ? ' watching' : ''}" id="tzWatchBtn" title="${isWatching ? 'Отписаться' : 'Следить за изменениями'}">
+        <svg width="14" height="14" viewBox="0 0 24 24" fill="${isWatching ? 'currentColor' : 'none'}" stroke="currentColor" stroke-width="2"><path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"/><circle cx="12" cy="12" r="3"/></svg>
+        ${isWatching ? 'Слежу' : 'Следить'}${watcherCount > 0 ? ` (${watcherCount})` : ''}
+      </button>`;
+    }
     tzMeta.innerHTML = metaHtml;
     show(tzMeta);
+
+    // Watch button handler
+    $('tzWatchBtn')?.addEventListener('click', async () => {
+      try {
+        const result = await api(`/api/tz/${id}/watch`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin })
+        });
+        showToast(result.watching ? 'Вы подписались на обновления' : 'Вы отписались', 'ok');
+        openTzDetail(id); // refresh
+      } catch (err) { showToast(err.message, 'danger'); }
+    });
 
     // History
     if (data.history && data.history.length) {
@@ -2269,6 +2301,9 @@ async function openTzDetail(id) {
     } else {
       hide(tzHistorySection);
     }
+
+    // Comments
+    await renderTzComments(id);
 
     show(tzPopup);
   } catch (err) {
@@ -2306,6 +2341,66 @@ function renderTzHistory(history) {
       <br><small>${esc(h.changed_by)}</small>
     </div>`;
   }).join('');
+}
+
+// TZ Comments
+async function renderTzComments(tzId) {
+  if (!tzCommentsSection) return;
+  try {
+    const comments = await api(`/api/tz/${tzId}/comments?pin=${encodeURIComponent(state.pin)}`);
+    tzCommentsCount.textContent = comments.length ? `(${comments.length})` : '';
+    const isSA = state.adminRole === 'superadmin';
+
+    tzCommentsList.innerHTML = comments.length
+      ? comments.map((c) => `<div class="tz-comment" data-comment-id="${esc(c.id)}">
+          <div class="tz-comment-header">
+            <strong>${esc(c.author)}</strong>
+            <span class="tz-comment-date">${fmtDate(c.created_at)}</span>
+            ${isSA ? `<button type="button" class="tz-comment-delete" title="Удалить">&times;</button>` : ''}
+          </div>
+          <div class="tz-comment-text">${esc(c.text)}</div>
+        </div>`).join('')
+      : '<p class="tz-comments-empty">Нет комментариев</p>';
+
+    // Delete handlers
+    if (isSA) {
+      tzCommentsList.querySelectorAll('.tz-comment-delete').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Удалить комментарий?')) return;
+          const commentId = btn.closest('.tz-comment').dataset.commentId;
+          try {
+            await api(`/api/tz/${tzId}/comments/${commentId}`, {
+              method: 'DELETE',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pin: state.pin })
+            });
+            await renderTzComments(tzId);
+          } catch (err) { showToast(err.message, 'danger'); }
+        });
+      });
+    }
+
+    // Send handler (re-bind each time to capture current tzId)
+    tzCommentSendBtn.onclick = async () => {
+      const text = tzCommentInput.value.trim();
+      if (!text) return;
+      tzCommentSendBtn.disabled = true;
+      try {
+        await api(`/api/tz/${tzId}/comments`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, text })
+        });
+        tzCommentInput.value = '';
+        await renderTzComments(tzId);
+      } catch (err) { showToast(err.message, 'danger'); }
+      finally { tzCommentSendBtn.disabled = false; }
+    };
+
+    show(tzCommentsSection);
+  } catch {
+    hide(tzCommentsSection);
+  }
 }
 
 // TZ form submit
@@ -2935,10 +3030,9 @@ async function renderKbCategories() {
     document.getElementById('kbManageCatsBtn')?.addEventListener('click', openKbCategoriesManager);
   }
 
-  let searchTimer;
   document.getElementById('kbSearchInput')?.addEventListener('input', (e) => {
-    clearTimeout(searchTimer);
-    searchTimer = setTimeout(() => kbSearch(e.target.value), 300);
+    clearTimeout(_kbSearchTimer);
+    _kbSearchTimer = setTimeout(() => kbSearch(e.target.value), 300);
   });
 
   try {
@@ -3147,7 +3241,7 @@ async function renderKbArticle() {
 // KB Editor (Quill)
 
 function initQuill() {
-  if (state.kbQuill) return state.kbQuill;
+  if (state.kbQuill) { state.kbQuill.off('text-change'); state.kbQuill = null; }
   if (typeof Quill === 'undefined') {
     msg(kbEditorMessage, 'Редактор не загружен. Проверьте подключение к интернету.', 'error');
     return null;
@@ -3329,7 +3423,7 @@ kbEditorForm.addEventListener('submit', async (e) => {
       });
       msg(kbEditorMessage, 'Статья создана.', 'success');
     }
-    setTimeout(() => { hide(kbEditorPopup); loadKbView(); }, 600);
+    setTimeout(() => { closeKbEditor(); loadKbView(); }, 600);
   } catch (err) {
     msg(kbEditorMessage, err.message, 'error');
   } finally {
@@ -3338,8 +3432,17 @@ kbEditorForm.addEventListener('submit', async (e) => {
   }
 });
 
-kbEditorCancelBtn.addEventListener('click', () => hide(kbEditorPopup));
-kbEditorPopup.addEventListener('click', (e) => { if (e.target === kbEditorPopup && confirm('Закрыть редактор?')) hide(kbEditorPopup); });
+function closeKbEditor() {
+  if (state.kbQuill) {
+    state.kbQuill.off('text-change');
+    state.kbQuill = null;
+    const container = document.getElementById('kbQuillEditor');
+    if (container) container.innerHTML = '';
+  }
+  hide(kbEditorPopup);
+}
+kbEditorCancelBtn.addEventListener('click', closeKbEditor);
+kbEditorPopup.addEventListener('click', (e) => { if (e.target === kbEditorPopup && confirm('Закрыть редактор?')) closeKbEditor(); });
 
 // KB Categories manager
 

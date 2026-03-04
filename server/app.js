@@ -45,7 +45,8 @@ const FILES = {
   tz: path.join(dataDir, 'tz.json'),
   tzHistory: path.join(dataDir, 'tz-history.json'),
   boards: path.join(dataDir, 'boards.json'),
-  aiTasks: path.join(dataDir, 'ai-tasks.json')
+  aiTasks: path.join(dataDir, 'ai-tasks.json'),
+  tzComments: path.join(dataDir, 'tz-comments.json')
 };
 
 /* ── Security middleware ── */
@@ -332,8 +333,8 @@ app.use((req, res, next) => {
   if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) {
     const origin = req.get('origin');
     if (origin) {
-      const allowed = [publicBaseUrl, `http://localhost:${port}`];
-      if (!allowed.some((a) => origin.startsWith(a))) {
+      const allowed = [publicBaseUrl, `http://localhost:${port}`, `https://localhost:${port}`];
+      if (!allowed.includes(origin)) {
         return res.status(403).json({ message: 'Запрос заблокирован (origin).' });
       }
     }
@@ -387,21 +388,17 @@ async function verifyPin(pin, hash, salt) {
   } catch { return false; }
 }
 
-// Simple in-memory cache: pin → {userId, expires}
+// Simple in-memory cache: pin → {user, expires}
 const _pinCache = new Map();
 const PIN_CACHE_TTL = 5 * 60 * 1000;
 
 async function getUserByPin(pin) {
   const cached = _pinCache.get(pin);
-  if (cached && cached.expires > Date.now()) {
-    const users = await readJson(FILES.users, []);
-    const u = users.find((x) => x.id === cached.userId);
-    if (u) return u;
-  }
+  if (cached && cached.expires > Date.now()) return cached.user;
   const users = await readJson(FILES.users, []);
   for (const u of users) {
     if (u.pinHash && await verifyPin(pin, u.pinHash, u.pinSalt)) {
-      _pinCache.set(pin, { userId: u.id, expires: Date.now() + PIN_CACHE_TTL });
+      _pinCache.set(pin, { user: u, expires: Date.now() + PIN_CACHE_TTL });
       return u;
     }
   }
@@ -409,6 +406,9 @@ async function getUserByPin(pin) {
 }
 
 function invalidatePinCache(pin) { _pinCache.delete(pin); }
+function invalidatePinCacheByUserId(userId) {
+  for (const [p, v] of _pinCache) { if (v.user && v.user.id === userId) { _pinCache.delete(p); break; } }
+}
 
 async function migrateUsers() {
   const data = await readJson(FILES.users, {});
@@ -580,7 +580,7 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
 
   const adminRole = getUserRole(pin, user);
   return res.json({
-    pin, fullName: user.fullName, contact: user.contact,
+    fullName: user.fullName, contact: user.contact,
     position: user.position || '', userId: user.id,
     avatar: user.avatar || '', admin: !!adminRole, adminRole: adminRole || null,
     workLocation: user.workLocation || '', workDesk: user.workDesk || ''
@@ -1221,9 +1221,7 @@ app.post('/api/admin/update-user', async (req, res) => {
       target.pinHash = hash;
       target.pinSalt = salt;
       // Invalidate any cached entry for old pin
-      for (const [cachedPin, cv] of _pinCache) {
-        if (cv.userId === targetId) { _pinCache.delete(cachedPin); break; }
-      }
+      invalidatePinCacheByUserId(targetId);
       // Update bookings by fullName (since we no longer store old pin)
       const bookings = await readJson(FILES.bookings, []);
       let changed = false;
@@ -1892,18 +1890,23 @@ function filterTz(allTz, body, usersMap) {
   const fMissingDeadline = !!body.missing_deadline;
   const fAssignee = String(body.assignee_id || '').trim();
 
-  let items = allTz.map((tz) => {
-    const item = { ...tz, flags: computeTzFlags(tz) };
-    if (usersMap && tz.assignee_id) item.assignee_name = usersMap.get(tz.assignee_id) || null;
-    return item;
-  });
-
+  // Phase 1: cheap filters on raw data (before computeTzFlags)
+  let items = allTz;
   if (fBoardId) items = items.filter((t) => t.board_id === fBoardId);
   if (fSystem) items = items.filter((t) => t.system === fSystem);
   if (fStatus) items = items.filter((t) => t.status === fStatus);
   if (fType) items = items.filter((t) => t.type === fType);
   if (fPriority) items = items.filter((t) => t.priority === fPriority);
   if (fAssignee) items = items.filter((t) => t.assignee_id === fAssignee);
+
+  // Phase 2: compute flags + assignee names only for remaining items
+  items = items.map((tz) => {
+    const item = { ...tz, flags: computeTzFlags(tz) };
+    if (usersMap && tz.assignee_id) item.assignee_name = usersMap.get(tz.assignee_id) || null;
+    return item;
+  });
+
+  // Phase 3: text search (after assignee_name is resolved)
   if (fSearch) items = items.filter((t) =>
     (t.title && t.title.toLowerCase().includes(fSearch)) ||
     (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
@@ -1911,6 +1914,8 @@ function filterTz(allTz, body, usersMap) {
     (t.description && t.description.toLowerCase().includes(fSearch)) ||
     (t.assignee_name && t.assignee_name.toLowerCase().includes(fSearch))
   );
+
+  // Phase 4: flag-based filters
   if (fOverdue) items = items.filter((t) => t.flags.overdue);
   if (fNoDates) items = items.filter((t) => t.flags.no_dates);
   if (fNoOwner) items = items.filter((t) => t.flags.no_owner);
@@ -2265,11 +2270,128 @@ app.patch('/api/tz/:id/status', async (req, res) => {
 
     const changedBy = authUser.fullName || pin;
     await recordTzHistory(tz.id, 'status', tz.status, newStatus, changedBy);
+    const oldStatus = tz.status;
     tz.status = newStatus;
     tz.updated_at = new Date().toISOString();
     await writeJson(FILES.tz, allTz);
 
+    // Notify watchers
+    const oldLabel = statusLabelsLocal[oldStatus] || oldStatus;
+    const newLabel = statusLabelsLocal[newStatus] || newStatus;
+    notifyTzWatchers(tz, `Статус: ${oldLabel} → <b>${escHtml(newLabel)}</b>\nИзменил: ${escHtml(changedBy)}`, authUser.id);
+
     return res.json({ message: `Статус изменён на «${statusLabelsLocal[newStatus] || newStatus}».`, tz: { ...tz, flags: computeTzFlags(tz) } });
+  });
+});
+
+/* ── TZ Watchers ── */
+
+app.post('/api/tz/:id/watch', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const role = getUserRole(pin, user);
+  if (role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+
+  const tzId = req.params.id;
+
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    const tz = allTz.find((t) => t.id === tzId);
+    if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+    if (!tz.watchers) tz.watchers = [];
+    const idx = tz.watchers.indexOf(user.id);
+    if (idx >= 0) {
+      tz.watchers.splice(idx, 1);
+      await writeJson(FILES.tz, allTz);
+      return res.json({ watching: false, watchers: tz.watchers });
+    } else {
+      tz.watchers.push(user.id);
+      await writeJson(FILES.tz, allTz);
+      return res.json({ watching: true, watchers: tz.watchers });
+    }
+  });
+});
+
+// Notify watchers helper
+async function notifyTzWatchers(tz, changeText, excludeUserId) {
+  if (!tz.watchers || !tz.watchers.length || !TG_TOKEN) return;
+  const users = await readJson(FILES.users, []);
+  for (const watcherId of tz.watchers) {
+    if (watcherId === excludeUserId) continue;
+    const watcher = users.find((u) => u.id === watcherId);
+    if (!watcher || !watcher.tgChatId) continue;
+    const msg = `📌 <b>${escHtml(tz.tz_code)}</b> «${escHtml(tz.title)}»\n${changeText}`;
+    tgSend(watcher.tgChatId, msg);
+  }
+}
+
+/* ── TZ Comments ── */
+
+app.get('/api/tz/:id/comments', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const role = getUserRole(pin, user);
+  if (role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+
+  const tzId = req.params.id;
+  const all = await readJson(FILES.tzComments, []);
+  const comments = all.filter((c) => c.tz_id === tzId).sort((a, b) => a.created_at.localeCompare(b.created_at));
+  return res.json(comments);
+});
+
+app.post('/api/tz/:id/comments', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const role = getUserRole(pin, user);
+  if (role !== 'superadmin') return res.status(403).json({ message: 'Нет доступа.' });
+
+  const tzId = req.params.id;
+  const text = clip(String(req.body.text || '').trim(), 2000);
+  if (!text || text.length < 1) return res.status(400).json({ message: 'Комментарий не может быть пустым.' });
+
+  // Verify TZ exists
+  const allTz = await readJson(FILES.tz, []);
+  const tz = allTz.find((t) => t.id === tzId);
+  if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+  return withLock(FILES.tzComments, async () => {
+    const all = await readJson(FILES.tzComments, []);
+    const comment = {
+      id: randomUUID(),
+      tz_id: tzId,
+      text,
+      author: user.fullName,
+      author_id: user.id,
+      created_at: new Date().toISOString()
+    };
+    all.push(comment);
+    await writeJson(FILES.tzComments, all);
+
+    // Notify watchers about new comment
+    notifyTzWatchers(tz, `💬 ${escHtml(user.fullName)}: ${escHtml(text.length > 100 ? text.slice(0, 100) + '...' : text)}`, user.id);
+
+    return res.status(201).json(comment);
+  });
+});
+
+app.delete('/api/tz/:tzId/comments/:commentId', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const { commentId } = req.params;
+  if (!UUID_RE.test(commentId)) return res.status(400).json({ message: 'Некорректный ID.' });
+
+  return withLock(FILES.tzComments, async () => {
+    const all = await readJson(FILES.tzComments, []);
+    const idx = all.findIndex((c) => c.id === commentId);
+    if (idx === -1) return res.status(404).json({ message: 'Комментарий не найден.' });
+    all.splice(idx, 1);
+    await writeJson(FILES.tzComments, all);
+    return res.json({ message: 'Комментарий удалён.' });
   });
 });
 

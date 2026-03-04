@@ -1009,6 +1009,30 @@ button{
 .tz-history-field{font-weight:700;color:var(--text)}
 .tz-history-date{float:right;font-size:11px;opacity:.7}
 
+/* ── TZ Comments ── */
+.tz-comments-section{margin-top:16px;border-top:1px solid var(--border);padding-top:12px}
+.tz-comments-section h4{margin:0 0 8px;font-size:14px;color:var(--text)}
+.tz-comments-count{font-weight:400;color:var(--text-sec);font-size:12px}
+.tz-comments-list{max-height:300px;overflow-y:auto;margin-bottom:10px}
+.tz-comment{padding:8px 10px;border-bottom:1px solid var(--border)}
+.tz-comment:last-child{border-bottom:none}
+.tz-comment-header{display:flex;align-items:center;gap:8px;font-size:12px;margin-bottom:4px}
+.tz-comment-header strong{color:var(--text);font-size:13px}
+.tz-comment-date{color:var(--text-sec);font-size:11px}
+.tz-comment-delete{margin-left:auto;background:none;border:none;color:var(--text-sec);cursor:pointer;font-size:16px;padding:0 4px;line-height:1}
+.tz-comment-delete:hover{color:#e53e3e}
+.tz-comment-text{font-size:13px;color:var(--text);white-space:pre-wrap;word-break:break-word}
+.tz-comments-empty{font-size:12px;color:var(--text-sec);margin:8px 0;text-align:center}
+.tz-comment-form{display:flex;gap:8px;align-items:flex-end}
+.tz-comment-form textarea{flex:1;font-size:13px;resize:vertical;min-height:38px}
+.tz-comment-form .btn-sm{white-space:nowrap}
+
+/* ── TZ Watch button ── */
+.tz-watch-btn{display:inline-flex;align-items:center;gap:4px;background:none;border:1px solid var(--border);border-radius:6px;padding:3px 8px;font-size:11px;color:var(--text-sec);cursor:pointer;transition:all .15s}
+.tz-watch-btn:hover{border-color:var(--accent);color:var(--accent)}
+.tz-watch-btn.watching{background:var(--accent);color:#fff;border-color:var(--accent)}
+.tz-watch-btn.watching:hover{opacity:.85}
+
 .tz-empty{text-align:center;color:var(--disabled);padding:32px 0;font-size:14px}
 
 /* TZ export button */

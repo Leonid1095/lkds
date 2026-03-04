@@ -526,6 +526,14 @@
             <h4>История изменений</h4>
             <div id="tzHistoryList" class="tz-history-list"></div>
           </div>
+          <div id="tzCommentsSection" class="tz-comments-section hidden">
+            <h4>Комментарии <span id="tzCommentsCount" class="tz-comments-count"></span></h4>
+            <div id="tzCommentsList" class="tz-comments-list"></div>
+            <div class="tz-comment-form">
+              <textarea id="tzCommentInput" rows="2" placeholder="Написать комментарий..." maxlength="2000"></textarea>
+              <button type="button" id="tzCommentSendBtn" class="btn-primary btn-sm">Отправить</button>
+            </div>
+          </div>
           <div class="popup-actions">
             <button type="submit" class="btn-primary" id="tzSubmitBtn">Создать</button>
             <button type="button" id="tzCancelBtn" class="btn-outline-dark">Отмена</button>
