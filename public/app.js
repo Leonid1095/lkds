@@ -2520,11 +2520,18 @@ function initQuill() {
     });
   });
 
-  // Replace pasted/dropped base64 images with server-uploaded URLs
-  q.clipboard.addMatcher('IMG', (node, delta) => {
-    const src = node.getAttribute('src') || '';
-    if (src.startsWith('data:')) {
-      // Convert base64 to file and upload asynchronously
+  // Track pending uploads so submit can wait
+  state.kbPendingUploads = 0;
+
+  // Watch for base64 images inserted via paste/drop and replace with server URLs
+  q.on('text-change', () => {
+    const imgs = q.root.querySelectorAll('img[src^="data:"]:not([data-uploading])');
+    for (const img of imgs) {
+      const src = img.getAttribute('src');
+      img.setAttribute('data-uploading', '1');
+      img.style.opacity = '0.4';
+      img.style.outline = '2px dashed #1172b6';
+      state.kbPendingUploads++;
       fetch(src).then(r => r.blob()).then(blob => {
         const ext = blob.type.split('/')[1] || 'png';
         const file = new File([blob], `pasted.${ext}`, { type: blob.type });
@@ -2533,14 +2540,20 @@ function initQuill() {
         fd.append('pin', state.pin);
         return fetch('/api/kb/upload-image', { method: 'POST', body: fd });
       }).then(r => r.json()).then(data => {
-        if (!data.url) return;
-        // Find and replace the base64 img with server URL
-        const imgs = q.root.querySelectorAll(`img[src^="data:"]`);
-        for (const img of imgs) img.setAttribute('src', data.url);
-      }).catch(() => {});
-      // Let Quill insert the base64 temporarily (will be replaced above)
+        if (data.url && img.parentNode) {
+          img.setAttribute('src', data.url);
+          img.removeAttribute('data-uploading');
+          img.style.opacity = '';
+          img.style.outline = '';
+        }
+      }).catch(() => {
+        img.removeAttribute('data-uploading');
+        img.style.opacity = '';
+        img.style.outline = '';
+      }).finally(() => {
+        state.kbPendingUploads = Math.max(0, state.kbPendingUploads - 1);
+      });
     }
-    return delta;
   });
 
   state.kbQuill = q;
@@ -2585,16 +2598,24 @@ kbEditorForm.addEventListener('submit', async (e) => {
   e.preventDefault();
   msg(kbEditorMessage, '');
   kbEditorSubmitBtn.disabled = true;
+  const origText = kbEditorSubmitBtn.textContent;
+  kbEditorSubmitBtn.textContent = '⏳ Сохранение...';
 
   const q = state.kbQuill;
 
-  // Upload any remaining base64 images before saving
-  if (q) {
-    const imgs = q.root.querySelectorAll('img[src^="data:"]');
-    for (const img of imgs) {
+  // Extract HTML and replace base64 images with server-uploaded URLs
+  let content = q ? q.root.innerHTML : '';
+
+  // Find all base64 images in HTML string and upload each
+  const base64Regex = /<img([^>]*?)src="(data:image\/[^"]+)"([^>]*?)>/g;
+  const matches = [...content.matchAll(base64Regex)];
+  if (matches.length) {
+    for (let i = 0; i < matches.length; i++) {
+      const match = matches[i];
+      const dataUrl = match[2];
+      kbEditorSubmitBtn.textContent = `⏳ Загрузка фото ${i + 1}/${matches.length}...`;
       try {
-        msg(kbEditorMessage, `Загрузка изображений (${Array.from(imgs).indexOf(img) + 1}/${imgs.length})...`, 'info');
-        const resp = await fetch(img.src);
+        const resp = await fetch(dataUrl);
         const blob = await resp.blob();
         const ext = blob.type.split('/')[1] || 'png';
         const file = new File([blob], `pasted.${ext}`, { type: blob.type });
@@ -2603,13 +2624,13 @@ kbEditorForm.addEventListener('submit', async (e) => {
         fd.append('pin', state.pin);
         const upRes = await fetch('/api/kb/upload-image', { method: 'POST', body: fd });
         const upData = await upRes.json();
-        if (upRes.ok && upData.url) img.setAttribute('src', upData.url);
+        if (upRes.ok && upData.url) {
+          content = content.replace(dataUrl, upData.url);
+        }
       } catch (_) { /* keep base64 if upload fails */ }
     }
-    if (imgs.length) msg(kbEditorMessage, '', '');
   }
-
-  const content = q ? q.root.innerHTML : '';
+  kbEditorSubmitBtn.textContent = '⏳ Сохранение...';
 
   const body = {
     pin: state.pin,
@@ -2640,6 +2661,7 @@ kbEditorForm.addEventListener('submit', async (e) => {
     msg(kbEditorMessage, err.message, 'error');
   } finally {
     kbEditorSubmitBtn.disabled = false;
+    kbEditorSubmitBtn.textContent = origText;
   }
 });
 

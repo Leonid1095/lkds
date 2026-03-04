@@ -1911,7 +1911,7 @@ app.put('/api/kb/articles/:id', async (req, res) => {
       article.title = t;
     }
     if (req.body.content !== undefined) {
-      article.content = clip(String(req.body.content).trim(), 200000);
+      article.content = clip(String(req.body.content).trim(), 2000000);
     }
     if (req.body.category_id !== undefined) {
       const catId = String(req.body.category_id).trim();
