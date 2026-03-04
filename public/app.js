@@ -2751,6 +2751,8 @@ const KANBAN_STATUS_COLORS_FALLBACK = {
 function renderKanban(data) {
   if (!tzListContainer) return;
   const { columns, transitions, statusLabels, boardColumns } = data;
+  // Store transitions for DnD handlers
+  state.kanbanTransitions = transitions || {};
 
   // Use board column order if available, else fallback to keys of columns
   const displayOrder = boardColumns
@@ -2766,7 +2768,7 @@ function renderKanban(data) {
     const color = colorMap[status] || '#edf2f7';
     const allowed = transitions[status] || [];
 
-    html += `<div class="kanban-column" data-status="${esc(status)}" data-allowed="${esc(JSON.stringify(allowed))}">
+    html += `<div class="kanban-column" data-status="${esc(status)}">
       <div class="kanban-column-header" style="background:${color}">
         <span class="kanban-col-title">${esc(statusLabels[status] || status)}</span>
         <span class="kanban-col-count">${cards.length}</span>
@@ -2846,8 +2848,7 @@ function initKanbanDnD() {
     const targetStatus = col.dataset.status;
     if (targetStatus === dragFromStatus) { e.dataTransfer.dropEffect = 'none'; return; }
 
-    const fromCol = board.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
-    const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
+    const fromAllowed = (state.kanbanTransitions || {})[dragFromStatus] || [];
     if (fromAllowed.includes(targetStatus)) {
       col.classList.add('drag-over');
       col.classList.remove('drag-forbidden');
@@ -2879,8 +2880,7 @@ function initKanbanDnD() {
     const targetStatus = col.dataset.status;
     if (targetStatus === dragFromStatus) return;
 
-    const fromCol = board.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
-    const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
+    const fromAllowed = (state.kanbanTransitions || {})[dragFromStatus] || [];
     if (!fromAllowed.includes(targetStatus)) return;
 
     try {
@@ -3955,6 +3955,7 @@ function renderKanbanSwimlanes(data, swimlaneType) {
   }
   if (!tzListContainer) return;
   const { transitions, statusLabels, boardColumns, swimlanes } = data;
+  state.kanbanTransitions = transitions || {};
   const displayOrder = boardColumns
     ? boardColumns.filter((c) => !c.hidden).sort((a, b) => a.order - b.order).map((c) => c.id)
     : Object.keys(data.columns);
