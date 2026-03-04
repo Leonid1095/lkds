@@ -1,0 +1,93 @@
+[
+  {
+    "id": "0577e1cf-67e3-4a04-b57b-7f2863720572",
+    "name": "Техзадания",
+    "slug": "tz",
+    "code_prefix": "TZ",
+    "description": "",
+    "columns": [
+      {
+        "id": "draft",
+        "name": "Черновик",
+        "color": "#edf2f7",
+        "order": 0,
+        "hidden": false
+      },
+      {
+        "id": "review",
+        "name": "На рассмотрении",
+        "color": "#fefcbf",
+        "order": 1,
+        "hidden": false
+      },
+      {
+        "id": "analysis",
+        "name": "Анализ",
+        "color": "#bee3f8",
+        "order": 2,
+        "hidden": false
+      },
+      {
+        "id": "development",
+        "name": "Разработка",
+        "color": "#c3dafe",
+        "order": 3,
+        "hidden": false
+      },
+      {
+        "id": "testing",
+        "name": "Тестирование",
+        "color": "#e9d8fd",
+        "order": 4,
+        "hidden": false
+      },
+      {
+        "id": "release",
+        "name": "Релиз",
+        "color": "#feebc8",
+        "order": 5,
+        "hidden": false
+      },
+      {
+        "id": "production",
+        "name": "В продакшене",
+        "color": "#c6f6d5",
+        "order": 6,
+        "hidden": false
+      },
+      {
+        "id": "partial",
+        "name": "В продакшене (частично)",
+        "color": "#fde68a",
+        "order": 7,
+        "hidden": false
+      },
+      {
+        "id": "cancelled",
+        "name": "Отменено",
+        "color": "#fed7d7",
+        "order": 8,
+        "hidden": false
+      }
+    ],
+    "default_column": "draft",
+    "systems": [
+      "ALIS",
+      "TOS",
+      "WMS",
+      "1C_CRM",
+      "OTHER"
+    ],
+    "types": [
+      "ТЗ",
+      "Дефект",
+      "Заявка",
+      "Задача",
+      "Недоработка",
+      "Предложение"
+    ],
+    "is_default": true,
+    "created_at": "2026-03-04T13:34:05.573Z",
+    "updated_at": "2026-03-04T13:34:05.573Z"
+  }
+]

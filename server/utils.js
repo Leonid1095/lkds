@@ -24,11 +24,12 @@ export const TZ_STATUS_ORD = {
   testing: 4, release: 5, production: 6, partial: 7, cancelled: 99
 };
 
-export function computeTzFlags(tz) {
+export function computeTzFlags(tz, statusOrd) {
   const now = new Date();
   const today = now.toISOString().slice(0, 10);
   const flags = {};
-  const ord = TZ_STATUS_ORD[tz.status] ?? 0;
+  const ordMap = statusOrd || TZ_STATUS_ORD;
+  const ord = ordMap[tz.status] ?? 0;
 
   flags.analysis_overdue = !!tz.date_analysis_deadline && today > tz.date_analysis_deadline && ord < 3;
   flags.dev_overdue = !!tz.date_dev_deadline && today > tz.date_dev_deadline && ord < 4;

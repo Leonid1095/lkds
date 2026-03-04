@@ -44,6 +44,7 @@ const FILES = {
   pinRequests: path.join(dataDir, 'pin-requests.json'),
   tz: path.join(dataDir, 'tz.json'),
   tzHistory: path.join(dataDir, 'tz-history.json'),
+  boards: path.join(dataDir, 'boards.json'),
   aiTasks: path.join(dataDir, 'ai-tasks.json')
 };
 
@@ -422,6 +423,57 @@ async function migrateUsers() {
   console.log(`[migrate] done: ${result.length} users`);
 }
 
+async function migrateBoards() {
+  let boards = await readJson(FILES.boards, null);
+  if (!boards) {
+    const defaultId = randomUUID();
+    const now = new Date().toISOString();
+    boards = [{
+      id: defaultId,
+      name: 'Техзадания',
+      slug: 'tz',
+      code_prefix: 'TZ',
+      description: '',
+      columns: [
+        { id: 'draft', name: 'Черновик', color: '#edf2f7', order: 0, hidden: false },
+        { id: 'review', name: 'На рассмотрении', color: '#fefcbf', order: 1, hidden: false },
+        { id: 'analysis', name: 'Анализ', color: '#bee3f8', order: 2, hidden: false },
+        { id: 'development', name: 'Разработка', color: '#c3dafe', order: 3, hidden: false },
+        { id: 'testing', name: 'Тестирование', color: '#e9d8fd', order: 4, hidden: false },
+        { id: 'release', name: 'Релиз', color: '#feebc8', order: 5, hidden: false },
+        { id: 'production', name: 'В продакшене', color: '#c6f6d5', order: 6, hidden: false },
+        { id: 'partial', name: 'В продакшене (частично)', color: '#fde68a', order: 7, hidden: false },
+        { id: 'cancelled', name: 'Отменено', color: '#fed7d7', order: 8, hidden: false }
+      ],
+      default_column: 'draft',
+      systems: ['ALIS', 'TOS', 'WMS', '1C_CRM', 'OTHER'],
+      types: ['ТЗ', 'Дефект', 'Заявка', 'Задача', 'Недоработка', 'Предложение'],
+      is_default: true,
+      created_at: now,
+      updated_at: now
+    }];
+    await writeJson(FILES.boards, boards);
+    console.log(`[migrate] boards.json created with default board ${defaultId}`);
+  }
+
+  // Assign board_id to all TZ records without one
+  const defaultBoard = boards.find(b => b.is_default);
+  if (defaultBoard) {
+    const allTz = await readJson(FILES.tz, []);
+    let changed = false;
+    for (const tz of allTz) {
+      if (!tz.board_id) {
+        tz.board_id = defaultBoard.id;
+        changed = true;
+      }
+    }
+    if (changed) {
+      await writeJson(FILES.tz, allTz);
+      console.log(`[migrate] assigned board_id to TZ records`);
+    }
+  }
+}
+
 function isValidDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }
 
 function toTime(v) {
@@ -454,8 +506,8 @@ const TZ_STATUS_ORD = _TZ_STATUS_ORD;
 const TZ_STATUS_LABELS = _TZ_STATUS_LABELS;
 const computeTzFlags = _computeTzFlags;
 
-function generateTzCode(allTz, system) {
-  const prefix = `TZ-${system}-`;
+function generateTzCode(allTz, system, codePrefix = 'TZ') {
+  const prefix = `${codePrefix}-${system}-`;
   const existing = allTz.filter((t) => t.tz_code && t.tz_code.startsWith(prefix));
   let maxNum = 0;
   for (const t of existing) {
@@ -1352,10 +1404,252 @@ app.patch('/api/bookings/:id', async (req, res) => {
   });
 });
 
+/* ── Boards (настраиваемые доски) ── */
+
+function isValidHexColor(c) { return /^#([0-9a-fA-F]{3}|[0-9a-fA-F]{6})$/.test(c); }
+
+function slugify(str) {
+  return str.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '-').replace(/^-|-$/g, '').slice(0, 40) || 'board';
+}
+
+function getColumnSlug(name) {
+  return name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '_').replace(/^_|_$/g, '').slice(0, 30) || 'col';
+}
+
+app.get('/api/boards', async (_req, res) => {
+  const boards = await readJson(FILES.boards, []);
+  res.json(boards);
+});
+
+app.post('/api/boards', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const name = clip(String(req.body.name || '').trim(), 100);
+  if (!name || name.length < 2) return res.status(400).json({ message: 'Название доски минимум 2 символа.' });
+
+  const code_prefix = clip(String(req.body.code_prefix || '').trim(), 10).toUpperCase() || 'BD';
+  const description = clip(String(req.body.description || '').trim(), 500);
+
+  return withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    let slug = slugify(name);
+    if (boards.some(b => b.slug === slug)) slug += '-' + Date.now().toString(36);
+
+    const now = new Date().toISOString();
+    const board = {
+      id: randomUUID(),
+      name,
+      slug,
+      code_prefix,
+      description,
+      columns: [
+        { id: 'todo', name: 'К выполнению', color: '#edf2f7', order: 0, hidden: false },
+        { id: 'in_progress', name: 'В работе', color: '#bee3f8', order: 1, hidden: false },
+        { id: 'done', name: 'Готово', color: '#c6f6d5', order: 2, hidden: false }
+      ],
+      default_column: 'todo',
+      systems: [],
+      types: ['Задача'],
+      is_default: false,
+      created_at: now,
+      updated_at: now
+    };
+    boards.push(board);
+    await writeJson(FILES.boards, boards);
+    return res.status(201).json({ message: 'Доска создана.', board });
+  });
+});
+
+app.put('/api/boards/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  return withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const board = boards.find(b => b.id === req.params.id);
+    if (!board) return res.status(404).json({ message: 'Доска не найдена.' });
+
+    if (req.body.name !== undefined) board.name = clip(String(req.body.name).trim(), 100);
+    if (req.body.description !== undefined) board.description = clip(String(req.body.description).trim(), 500);
+    if (req.body.code_prefix !== undefined) board.code_prefix = clip(String(req.body.code_prefix).trim(), 10).toUpperCase();
+    if (req.body.default_column !== undefined) {
+      const colExists = board.columns.some(c => c.id === req.body.default_column);
+      if (colExists) board.default_column = req.body.default_column;
+    }
+    if (Array.isArray(req.body.systems)) board.systems = req.body.systems.map(s => String(s).trim()).filter(Boolean);
+    if (Array.isArray(req.body.types)) board.types = req.body.types.map(s => String(s).trim()).filter(Boolean);
+    board.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.boards, boards);
+    return res.json({ message: 'Доска обновлена.', board });
+  });
+});
+
+app.delete('/api/boards/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  return withLock(FILES.tz, async () => withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const idx = boards.findIndex(b => b.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Доска не найдена.' });
+    if (boards[idx].is_default) return res.status(400).json({ message: 'Нельзя удалить доску по умолчанию.' });
+
+    const allTz = await readJson(FILES.tz, []);
+    const hasCards = allTz.some(t => t.board_id === req.params.id);
+    if (hasCards) return res.status(400).json({ message: 'Нельзя удалить доску с карточками. Сначала переместите или удалите карточки.' });
+
+    boards.splice(idx, 1);
+    await writeJson(FILES.boards, boards);
+    return res.json({ message: 'Доска удалена.' });
+  }));
+});
+
+/* ── Board columns ── */
+
+app.post('/api/boards/:id/columns', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const name = clip(String(req.body.name || '').trim(), 60);
+  if (!name) return res.status(400).json({ message: 'Укажите название колонки.' });
+  const color = String(req.body.color || '#edf2f7').trim();
+  if (!isValidHexColor(color)) return res.status(400).json({ message: 'Цвет должен быть в формате #RGB или #RRGGBB.' });
+
+  return withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const board = boards.find(b => b.id === req.params.id);
+    if (!board) return res.status(404).json({ message: 'Доска не найдена.' });
+
+    let colId = getColumnSlug(name);
+    if (board.columns.some(c => c.id === colId)) colId += '_' + Date.now().toString(36);
+
+    const maxOrder = board.columns.reduce((m, c) => Math.max(m, c.order), -1);
+    const col = { id: colId, name, color, order: maxOrder + 1, hidden: false };
+    board.columns.push(col);
+    board.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.boards, boards);
+    return res.status(201).json({ message: 'Колонка добавлена.', column: col, board });
+  });
+});
+
+app.put('/api/boards/:id/columns/:colId', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  return withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const board = boards.find(b => b.id === req.params.id);
+    if (!board) return res.status(404).json({ message: 'Доска не найдена.' });
+
+    const col = board.columns.find(c => c.id === req.params.colId);
+    if (!col) return res.status(404).json({ message: 'Колонка не найдена.' });
+
+    if (req.body.name !== undefined) col.name = clip(String(req.body.name).trim(), 60);
+    if (req.body.color !== undefined) {
+      const c = String(req.body.color).trim();
+      if (!isValidHexColor(c)) return res.status(400).json({ message: 'Цвет должен быть в формате #RGB или #RRGGBB.' });
+      col.color = c;
+    }
+    board.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.boards, boards);
+    return res.json({ message: 'Колонка обновлена.', column: col, board });
+  });
+});
+
+app.patch('/api/boards/:id/columns/reorder', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const order = req.body.order; // [{id, order}]
+  if (!Array.isArray(order)) return res.status(400).json({ message: 'Ожидается массив order.' });
+
+  return withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const board = boards.find(b => b.id === req.params.id);
+    if (!board) return res.status(404).json({ message: 'Доска не найдена.' });
+
+    for (const item of order) {
+      const col = board.columns.find(c => c.id === item.id);
+      if (col) col.order = Number(item.order) || 0;
+    }
+    board.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.boards, boards);
+    return res.json({ message: 'Порядок колонок обновлён.', board });
+  });
+});
+
+app.patch('/api/boards/:id/columns/:colId/hide', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  return withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const board = boards.find(b => b.id === req.params.id);
+    if (!board) return res.status(404).json({ message: 'Доска не найдена.' });
+
+    const col = board.columns.find(c => c.id === req.params.colId);
+    if (!col) return res.status(404).json({ message: 'Колонка не найдена.' });
+
+    col.hidden = !col.hidden;
+    board.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.boards, boards);
+    return res.json({ message: col.hidden ? 'Колонка скрыта.' : 'Колонка показана.', column: col, board });
+  });
+});
+
+app.delete('/api/boards/:id/columns/:colId', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const targetColId = String(req.body.target_column || '').trim();
+
+  return withLock(FILES.tz, async () => withLock(FILES.boards, async () => {
+    const boards = await readJson(FILES.boards, []);
+    const board = boards.find(b => b.id === req.params.id);
+    if (!board) return res.status(404).json({ message: 'Доска не найдена.' });
+
+    const colIdx = board.columns.findIndex(c => c.id === req.params.colId);
+    if (colIdx === -1) return res.status(404).json({ message: 'Колонка не найдена.' });
+
+    if (board.columns.length <= 1) return res.status(400).json({ message: 'Нельзя удалить последнюю колонку.' });
+
+    const allTz = await readJson(FILES.tz, []);
+    const cardsInCol = allTz.filter(t => t.board_id === board.id && t.status === req.params.colId);
+
+    if (cardsInCol.length > 0) {
+      if (!targetColId) {
+        return res.status(400).json({ message: `В колонке ${cardsInCol.length} карточек. Укажите target_column для переноса.` });
+      }
+      const targetExists = board.columns.some(c => c.id === targetColId && c.id !== req.params.colId);
+      if (!targetExists) {
+        return res.status(400).json({ message: 'target_column не найдена или это удаляемая колонка.' });
+      }
+      for (const tz of cardsInCol) tz.status = targetColId;
+      await writeJson(FILES.tz, allTz);
+    }
+
+    board.columns.splice(colIdx, 1);
+    if (board.default_column === req.params.colId) {
+      board.default_column = board.columns[0].id;
+    }
+    board.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.boards, boards);
+    return res.json({ message: 'Колонка удалена.', board });
+  }));
+});
+
 /* ── TZ (Технические задания) ── */
 
 app.get('/api/tz-config', async (_req, res) => {
   const users = await readJson(FILES.users, []);
+  const boards = await readJson(FILES.boards, []);
   const usersList = users.map(u => ({ id: u.id, fullName: u.fullName }));
   res.json({
     systems: TZ_SYSTEMS,
@@ -1365,7 +1659,8 @@ app.get('/api/tz-config', async (_req, res) => {
     priorities: TZ_PRIORITIES,
     statusLabels: TZ_STATUS_LABELS,
     transitions: TZ_TRANSITIONS,
-    users: usersList
+    users: usersList,
+    boards
   });
 });
 
@@ -1398,6 +1693,18 @@ app.post('/api/tz', async (req, res) => {
   const reqStatus = String(req.body.status || '').trim();
   const assignee_id = String(req.body.assignee_id || '').trim() || null;
   const deadline = String(req.body.deadline || '').trim() || null;
+  const boardId = String(req.body.board_id || '').trim();
+
+  // Resolve board
+  const boards = await readJson(FILES.boards, []);
+  let board;
+  if (boardId) {
+    board = boards.find(b => b.id === boardId);
+    if (!board) return res.status(400).json({ message: 'Указанная доска не найдена.' });
+  } else {
+    board = boards.find(b => b.is_default);
+    if (!board) return res.status(400).json({ message: 'Доска по умолчанию не найдена.' });
+  }
 
   if (!title || title.length < 3) return res.status(400).json({ message: 'Название ТЗ минимум 3 символа.' });
   if (!isUserType && !TZ_SYSTEMS.includes(system)) return res.status(400).json({ message: 'Выберите систему.' });
@@ -1409,12 +1716,12 @@ app.post('/api/tz', async (req, res) => {
   if (deadline && !isValidDate(deadline)) return res.status(400).json({ message: 'Дедлайн: YYYY-MM-DD.' });
   if (assignee_id && !UUID_RE.test(assignee_id)) return res.status(400).json({ message: 'Некорректный ID исполнителя.' });
 
-  // Валидация статуса при создании: пустой → draft, иначе должен быть допустимым переходом из draft
-  let initialStatus = 'draft';
-  if (reqStatus && reqStatus !== 'draft') {
-    const allowed = TZ_TRANSITIONS.draft || [];
-    if (!allowed.includes(reqStatus)) {
-      return res.status(400).json({ message: `Переход из «${TZ_STATUS_LABELS.draft}» в «${TZ_STATUS_LABELS[reqStatus] || reqStatus}» не допускается.` });
+  // Валидация статуса при создании: validate against board columns
+  const boardColIds = board.columns.map(c => c.id);
+  let initialStatus = board.default_column || boardColIds[0] || 'draft';
+  if (reqStatus && reqStatus !== initialStatus) {
+    if (!boardColIds.includes(reqStatus)) {
+      return res.status(400).json({ message: `Статус «${reqStatus}» не существует на этой доске.` });
     }
     initialStatus = reqStatus;
   }
@@ -1426,11 +1733,12 @@ app.post('/api/tz', async (req, res) => {
     const duplicate = allTz.find((t) => t.title.toLowerCase() === title.toLowerCase());
     if (duplicate) return res.status(400).json({ message: `ТЗ с таким названием уже существует: ${duplicate.tz_code}.` });
 
-    const tzCode = generateTzCode(allTz, system || 'OTHER');
+    const tzCode = generateTzCode(allTz, system || 'OTHER', board.code_prefix || 'TZ');
     const creatorName = authUser.fullName || pin;
 
     const tz = {
       id: randomUUID(),
+      board_id: board.id,
       tz_code: tzCode,
       title,
       system: system || (isUserType ? 'OTHER' : system),
@@ -1506,13 +1814,17 @@ app.put('/api/tz/:id', async (req, res) => {
       'assignee_id', 'deadline'
     ];
 
-    // Status transition check
+    // Status transition check — validate against board columns
     if (req.body.status !== undefined && req.body.status !== tz.status) {
       const newStatus = String(req.body.status).trim();
-      if (!TZ_STATUSES.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
-      const allowed = TZ_TRANSITIONS[tz.status] || [];
-      if (!allowed.includes(newStatus)) {
-        return res.status(400).json({ message: `Переход из «${TZ_STATUS_LABELS[tz.status]}» в «${TZ_STATUS_LABELS[newStatus]}» не допускается.` });
+      const boards = await readJson(FILES.boards, []);
+      const tzBoard = tz.board_id ? boards.find(b => b.id === tz.board_id) : null;
+      const validStatuses = tzBoard ? tzBoard.columns.map(c => c.id) : TZ_STATUSES;
+      if (!validStatuses.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
+      const statusLabelsLocal = tzBoard ? Object.fromEntries(tzBoard.columns.map(c => [c.id, c.name])) : TZ_STATUS_LABELS;
+      // Free-form transitions within board columns
+      if (!validStatuses.includes(tz.status) || !validStatuses.includes(newStatus)) {
+        return res.status(400).json({ message: `Переход из «${statusLabelsLocal[tz.status] || tz.status}» в «${statusLabelsLocal[newStatus] || newStatus}» не допускается.` });
       }
     }
 
@@ -1567,6 +1879,7 @@ app.put('/api/tz/:id', async (req, res) => {
 });
 
 function filterTz(allTz, body, usersMap) {
+  const fBoardId = String(body.board_id || '').trim();
   const fSystem = String(body.system || '').trim();
   const fStatus = String(body.status || '').trim();
   const fType = String(body.type || '').trim();
@@ -1585,6 +1898,7 @@ function filterTz(allTz, body, usersMap) {
     return item;
   });
 
+  if (fBoardId) items = items.filter((t) => t.board_id === fBoardId);
   if (fSystem) items = items.filter((t) => t.system === fSystem);
   if (fStatus) items = items.filter((t) => t.status === fStatus);
   if (fType) items = items.filter((t) => t.type === fType);
@@ -1688,7 +2002,9 @@ app.post('/api/admin/tz-stats', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
-  const allTz = await readJson(FILES.tz, []);
+  const fBoardId = String(req.body.board_id || '').trim();
+  let allTz = await readJson(FILES.tz, []);
+  if (fBoardId) allTz = allTz.filter(t => t.board_id === fBoardId);
   const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
 
   const stats = {
@@ -1706,6 +2022,7 @@ app.post('/api/admin/tz-stats', async (req, res) => {
   for (const s of TZ_SYSTEMS) stats.by_system[s] = 0;
   for (const tz of allTz) {
     if (stats.by_status[tz.status] !== undefined) stats.by_status[tz.status]++;
+    else stats.by_status[tz.status] = 1;
     if (stats.by_system[tz.system] !== undefined) stats.by_system[tz.system]++;
   }
 
@@ -1866,6 +2183,11 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
+  // Resolve board for columns
+  const fBoardId = String(req.body.board_id || '').trim();
+  const boards = await readJson(FILES.boards, []);
+  const board = fBoardId ? boards.find(b => b.id === fBoardId) : boards.find(b => b.is_default);
+
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
   const usersMap = new Map(users.map(u => [u.id, u.fullName]));
@@ -1876,14 +2198,31 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
     return (pa[a.priority] ?? 9) - (pa[b.priority] ?? 9) || a.created_at.localeCompare(b.created_at);
   });
 
+  // Use board columns if available, fallback to global statuses
+  const boardColumns = board ? board.columns.sort((a, b) => a.order - b.order) : null;
+  const colIds = boardColumns ? boardColumns.map(c => c.id) : TZ_STATUSES;
+  const statusLabels = boardColumns
+    ? Object.fromEntries(boardColumns.map(c => [c.id, c.name]))
+    : TZ_STATUS_LABELS;
+
   const columns = {};
-  for (const s of TZ_STATUSES) columns[s] = [];
+  for (const s of colIds) columns[s] = [];
   for (const item of items) {
-    const col = columns[item.status];
-    if (col) col.push(item);
+    if (columns[item.status]) columns[item.status].push(item);
+    else {
+      columns[item.status] = [item];
+    }
   }
 
-  return res.json({ columns, transitions: TZ_TRANSITIONS, statusLabels: TZ_STATUS_LABELS });
+  // Free-form transitions: any column → any other column
+  const transitions = Object.fromEntries(colIds.map(s => [s, colIds.filter(t => t !== s)]));
+
+  return res.json({
+    columns,
+    transitions,
+    statusLabels,
+    boardColumns: boardColumns || null
+  });
 });
 
 app.patch('/api/tz/:id/status', async (req, res) => {
@@ -1908,7 +2247,14 @@ app.patch('/api/tz/:id/status', async (req, res) => {
   }
 
   const newStatus = String(req.body.status || '').trim();
-  if (!TZ_STATUSES.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
+
+  // Validate against board columns if card has a board
+  const boards = await readJson(FILES.boards, []);
+  const board = tzPre?.board_id ? boards.find(b => b.id === tzPre.board_id) : null;
+  const validStatuses = board ? board.columns.map(c => c.id) : TZ_STATUSES;
+  const statusLabelsLocal = board ? Object.fromEntries(board.columns.map(c => [c.id, c.name])) : TZ_STATUS_LABELS;
+
+  if (!validStatuses.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
 
   return withLock(FILES.tz, async () => {
     const allTz = await readJson(FILES.tz, []);
@@ -1917,20 +2263,13 @@ app.patch('/api/tz/:id/status', async (req, res) => {
 
     if (tz.status === newStatus) return res.json({ message: 'Статус не изменился.', tz });
 
-    const allowed = TZ_TRANSITIONS[tz.status] || [];
-    if (!allowed.includes(newStatus)) {
-      return res.status(400).json({
-        message: `Переход из «${TZ_STATUS_LABELS[tz.status]}» в «${TZ_STATUS_LABELS[newStatus]}» не допускается.`
-      });
-    }
-
     const changedBy = authUser.fullName || pin;
     await recordTzHistory(tz.id, 'status', tz.status, newStatus, changedBy);
     tz.status = newStatus;
     tz.updated_at = new Date().toISOString();
     await writeJson(FILES.tz, allTz);
 
-    return res.json({ message: `Статус изменён на «${TZ_STATUS_LABELS[newStatus]}».`, tz: { ...tz, flags: computeTzFlags(tz) } });
+    return res.json({ message: `Статус изменён на «${statusLabelsLocal[newStatus] || newStatus}».`, tz: { ...tz, flags: computeTzFlags(tz) } });
   });
 });
 
@@ -2254,6 +2593,7 @@ app.get('*', (_req, res) => {
 fs.mkdir(kbImagesDir, { recursive: true }).catch(() => {});
 
 migrateUsers()
+  .then(() => migrateBoards())
   .then(() => {
     app.listen(port, () => {
       console.log(`LKDS portal started on http://localhost:${port}`);

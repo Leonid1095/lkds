@@ -1194,6 +1194,72 @@ button{
   .tz-checkbox-label{font-size:11px}
 }
 
+/* ── Board tabs ── */
+.tz-board-tabs{
+  display:flex;gap:4px;flex-wrap:wrap;margin-bottom:12px;
+  border-bottom:2px solid var(--border);padding-bottom:4px;
+}
+.tz-board-tab{
+  padding:7px 16px;border:none;background:transparent;
+  font-size:13px;font-weight:600;color:var(--text-sec);
+  border-radius:8px 8px 0 0;cursor:pointer;transition:all .2s;
+  white-space:nowrap;
+}
+.tz-board-tab:hover{background:var(--accent-soft);color:var(--accent)}
+.tz-board-tab.active{
+  background:var(--accent);color:#fff;
+  box-shadow:0 2px 6px rgba(14,33,86,.15);
+}
+.tz-board-tab-add,.tz-board-tab-settings{
+  padding:7px 10px;color:var(--text-sec);font-size:15px;
+}
+.tz-board-tab-add:hover,.tz-board-tab-settings:hover{
+  color:var(--accent);background:var(--accent-soft);
+}
+.tz-board-tab-settings svg{vertical-align:middle}
+
+/* ── Board settings modal ── */
+.board-settings-card{max-width:560px;max-height:90vh;overflow-y:auto}
+.board-columns-list{display:flex;flex-direction:column;gap:4px}
+.board-col-row{
+  display:flex;align-items:center;gap:8px;padding:6px 8px;
+  background:var(--bg);border-radius:8px;border:1px solid var(--border);
+  cursor:grab;transition:background .15s;
+}
+.board-col-row:hover{background:var(--accent-soft)}
+.board-col-row.dragging{opacity:.4}
+.board-col-row.drag-over{border-color:var(--accent);background:#e8f4fd}
+.board-col-drag{cursor:grab;color:var(--disabled);font-size:14px;user-select:none}
+.board-col-color{width:28px;height:28px;padding:0;border:1px solid var(--border);border-radius:6px;cursor:pointer}
+.board-col-name{
+  flex:1;border:1px solid transparent;background:transparent;
+  padding:4px 8px;font:inherit;font-size:13px;border-radius:6px;
+  color:var(--text);transition:border-color .2s;
+}
+.board-col-name:focus{outline:none;border-color:var(--accent);background:#fff}
+.board-col-hide-btn,.board-col-del-btn{
+  border:none;background:transparent;cursor:pointer;padding:4px;
+  font-size:14px;color:var(--text-sec);border-radius:4px;transition:all .2s;
+}
+.board-col-hide-btn:hover{background:var(--accent-soft);color:var(--accent)}
+.board-col-del-btn:hover{background:var(--danger-soft);color:var(--danger)}
+.board-add-col-row input[type="text"],.board-add-col-row input:not([type]){
+  border:1.5px solid var(--border);border-radius:8px;padding:6px 10px;
+  font:inherit;font-size:13px;
+}
+.board-add-col-row input:not([type]):focus,.board-add-col-row input[type="text"]:focus{
+  outline:none;border-color:var(--accent);
+}
+
+/* Board responsive */
+@media(max-width:600px){
+  .tz-board-tabs{gap:2px;overflow-x:auto;flex-wrap:nowrap;-webkit-overflow-scrolling:touch}
+  .tz-board-tab{padding:6px 10px;font-size:12px;flex-shrink:0}
+  .board-settings-card{max-width:100%;margin:8px}
+  .board-col-row{gap:4px;padding:4px 6px}
+  .board-col-name{font-size:12px;padding:3px 6px}
+}
+
 /* ── Knowledge Base (Wiki) ── */
 .kb-breadcrumbs{display:flex;align-items:center;gap:6px;margin-bottom:8px;flex-wrap:wrap}
 .kb-crumb{color:var(--accent);text-decoration:none;font-size:14px;font-weight:500}

@@ -177,6 +177,8 @@ const state = {
   tzList: [],
   tzEditId: null,
   tzViewMode: 'list', // 'list' | 'kanban'
+  tzBoardId: null, // current board id
+  tzBoards: [], // board objects from config
   kbView: 'categories', // 'categories' | 'articles' | 'article'
   kbCategories: [],
   kbCategoryId: null,
@@ -250,6 +252,11 @@ function parseHash() {
     result.kbArticleId = parts[2];
   }
   if (parts[0] === 'tz' && parts[1] === 'kanban') result.tzKanban = true;
+  // #tz/board/{slug} or #tz/board/{slug}/kanban
+  if (parts[0] === 'tz' && parts[1] === 'board' && parts[2]) {
+    result.tzBoardSlug = parts[2];
+    if (parts[3] === 'kanban') result.tzKanban = true;
+  }
   return result;
 }
 
@@ -315,8 +322,12 @@ async function restoreFromHash() {
       }
     } catch { /* fallback to categories */ }
     await loadKbView();
-  } else if (h.tab === 'tz' && h.tzKanban) {
-    state.tzViewMode = 'kanban';
+  } else if (h.tab === 'tz') {
+    if (h.tzBoardSlug && state.tzBoards.length) {
+      const b = state.tzBoards.find(b => b.slug === h.tzBoardSlug);
+      if (b) state.tzBoardId = b.id;
+    }
+    if (h.tzKanban) state.tzViewMode = 'kanban';
     switchToTab('tz', false);
   } else {
     switchToTab(h.tab, false);
@@ -486,6 +497,11 @@ async function loadApp() {
 
   try {
     state.tzConfig = await api('/api/tz-config');
+    state.tzBoards = state.tzConfig.boards || [];
+    if (!state.tzBoardId && state.tzBoards.length) {
+      const defBoard = state.tzBoards.find(b => b.is_default) || state.tzBoards[0];
+      state.tzBoardId = defBoard.id;
+    }
   } catch { /* no tz-config */ }
 
   renderRooms();
@@ -1724,11 +1740,42 @@ async function showTzNotifications() {
 
 const TZ_PRIO_LABELS = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
 
+function getCurrentBoard() {
+  return state.tzBoards.find(b => b.id === state.tzBoardId) || state.tzBoards.find(b => b.is_default) || null;
+}
+
+function getBoardStatusLabel(status) {
+  const board = getCurrentBoard();
+  if (board) {
+    const col = board.columns.find(c => c.id === status);
+    if (col) return col.name;
+  }
+  return state.tzConfig?.statusLabels?.[status] || status;
+}
+
+function getBoardStatusColor(status) {
+  const board = getCurrentBoard();
+  if (board) {
+    const col = board.columns.find(c => c.id === status);
+    if (col) return col.color;
+  }
+  return null;
+}
+
 function tzStatusBadge(status) {
-  const cfg = state.tzConfig;
-  const label = cfg?.statusLabels?.[status] || status;
+  const label = getBoardStatusLabel(status);
+  const color = getBoardStatusColor(status);
   const cls = `tz-st-${status}`;
+  if (color) {
+    return `<span class="tz-status-badge" style="background:${esc(color)}">${esc(label)}</span>`;
+  }
   return `<span class="tz-status-badge ${cls}">${esc(label)}</span>`;
+}
+
+function getTzHashBase() {
+  const board = getCurrentBoard();
+  if (board && !board.is_default) return `tz/board/${board.slug}`;
+  return 'tz';
 }
 
 function tzPrioBadge(priority) {
@@ -1740,17 +1787,38 @@ function renderTzFilters() {
   if (!tzFilters || !state.tzConfig) return;
   const cfg = state.tzConfig;
   const f = state.tzFilters;
+  const board = getCurrentBoard();
+  const isSA = state.adminRole === 'superadmin';
+
+  // Board-specific statuses for filter dropdown
+  const boardCols = board ? board.columns.slice().sort((a, b) => a.order - b.order) : null;
+  const statusList = boardCols ? boardCols.map(c => ({ id: c.id, label: c.name })) : cfg.statuses.map(s => ({ id: s, label: cfg.statusLabels[s] || s }));
 
   const systemOpts = ['<option value="">Все системы</option>']
     .concat(cfg.systems.map((s) => `<option value="${esc(s)}"${f.system === s ? ' selected' : ''}>${esc(s)}</option>`)).join('');
   const statusOpts = ['<option value="">Все статусы</option>']
-    .concat(cfg.statuses.map((s) => `<option value="${esc(s)}"${f.status === s ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`)).join('');
+    .concat(statusList.map((s) => `<option value="${esc(s.id)}"${f.status === s.id ? ' selected' : ''}>${esc(s.label)}</option>`)).join('');
   const typeOpts = ['<option value="">Все типы</option>']
     .concat(cfg.types.map((t) => `<option value="${esc(t)}"${f.type === t ? ' selected' : ''}>${esc(t)}</option>`)).join('');
   const prioOpts = ['<option value="">Все приоритеты</option>']
     .concat(cfg.priorities.map((p) => `<option value="${esc(p)}"${f.priority === p ? ' selected' : ''}>${esc(TZ_PRIO_LABELS[p] || p)}</option>`)).join('');
 
-  tzFilters.innerHTML = `
+  // Board tabs
+  let boardTabsHtml = '';
+  if (state.tzBoards.length > 0) {
+    boardTabsHtml = '<div class="tz-board-tabs">';
+    for (const b of state.tzBoards) {
+      const active = b.id === state.tzBoardId ? ' active' : '';
+      boardTabsHtml += `<button type="button" class="tz-board-tab${active}" data-board-id="${esc(b.id)}" aria-label="Доска: ${esc(b.name)}">${esc(b.name)}</button>`;
+    }
+    if (isSA) {
+      boardTabsHtml += `<button type="button" class="tz-board-tab tz-board-tab-add" id="tzAddBoardBtn" title="Создать доску">+</button>`;
+      boardTabsHtml += `<button type="button" class="tz-board-tab tz-board-tab-settings" id="tzBoardSettingsBtn" title="Настройки доски"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg></button>`;
+    }
+    boardTabsHtml += '</div>';
+  }
+
+  tzFilters.innerHTML = `${boardTabsHtml}
     <div class="tz-filters-row">
       <select class="tz-filter-select" id="tzFilterSystem">${systemOpts}</select>
       <select class="tz-filter-select" id="tzFilterStatus">${statusOpts}</select>
@@ -1817,6 +1885,26 @@ function renderTzFilters() {
     importFile.addEventListener('change', () => { if (importFile.files.length) importTzExcel(importFile); });
   }
 
+  // Board tab click
+  document.querySelectorAll('.tz-board-tab[data-board-id]').forEach((tab) => {
+    tab.addEventListener('click', () => {
+      state.tzBoardId = tab.dataset.boardId;
+      state.tzFilters = { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false, missing_deadline: false };
+      const base = getTzHashBase();
+      updateHash(state.tzViewMode === 'kanban' ? base + '/kanban' : base);
+      renderTzFilters();
+      loadTzData();
+    });
+  });
+
+  // Add board button
+  const addBoardBtn = document.getElementById('tzAddBoardBtn');
+  if (addBoardBtn) addBoardBtn.addEventListener('click', openCreateBoardModal);
+
+  // Board settings button
+  const settingsBtn = document.getElementById('tzBoardSettingsBtn');
+  if (settingsBtn) settingsBtn.addEventListener('click', openBoardSettingsModal);
+
   // View toggle
   document.querySelectorAll('.tz-view-btn').forEach((btn) => {
     btn.addEventListener('click', () => {
@@ -1826,7 +1914,8 @@ function renderTzFilters() {
       const panel = document.getElementById('panelTz');
       if (btn.dataset.view === 'kanban') panel.classList.add('kanban-active');
       else panel.classList.remove('kanban-active');
-      updateHash(btn.dataset.view === 'kanban' ? 'tz/kanban' : 'tz');
+      const base = getTzHashBase();
+      updateHash(btn.dataset.view === 'kanban' ? base + '/kanban' : base);
       loadTzData();
     });
   });
@@ -1839,7 +1928,7 @@ async function exportTzExcel() {
     const res = await fetch('/api/admin/tz-export', {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, ...state.tzFilters })
+      body: JSON.stringify({ pin: state.pin, ...state.tzFilters, ...(state.tzBoardId ? { board_id: state.tzBoardId } : {}) })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -1944,18 +2033,19 @@ function renderTzList(items) {
 async function loadTzData() {
   if (!state.pin || state.adminRole !== 'superadmin') return;
   msg(tzMessage, '');
+  const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
   try {
     if (state.tzViewMode === 'kanban') {
       const [kanban, stats] = await Promise.all([
         api('/api/admin/tz-kanban', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, ...state.tzFilters })
+          body: JSON.stringify({ pin: state.pin, ...state.tzFilters, ...boardPayload })
         }),
         api('/api/admin/tz-stats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin })
+          body: JSON.stringify({ pin: state.pin, ...boardPayload })
         })
       ]);
       renderTzStats(stats);
@@ -1966,12 +2056,12 @@ async function loadTzData() {
         api('/api/admin/tz', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, ...state.tzFilters, pageSize: 999 })
+          body: JSON.stringify({ pin: state.pin, ...state.tzFilters, ...boardPayload, pageSize: 999 })
         }),
         api('/api/admin/tz-stats', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin })
+          body: JSON.stringify({ pin: state.pin, ...boardPayload })
         })
       ]);
       const items = Array.isArray(resp) ? resp : (resp.items || []);
@@ -1986,6 +2076,7 @@ async function loadTzData() {
 }
 
 function openTzCreateForm(presetType) {
+  if (presetType instanceof Event || typeof presetType !== 'string') presetType = undefined;
   state.tzEditId = null;
   const cfg = state.tzConfig;
   const isSA = state.adminRole === 'superadmin';
@@ -2021,12 +2112,21 @@ function openTzCreateForm(presetType) {
   $('tzAssigneeRow').style.display = isUserType ? '' : 'none';
   $('tzOwnerRow').style.display = isUserType ? 'none' : '';
 
-  // Status select — draft + допустимые переходы
-  const transitions = cfg.transitions['draft'] || [];
-  const statusOptions = ['draft', ...transitions];
-  $('tzStatus').innerHTML = statusOptions.map((s) =>
-    `<option value="${esc(s)}"${s === 'draft' ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
-  ).join('');
+  // Status select — use board columns
+  const board = getCurrentBoard();
+  const boardCols = board ? board.columns.slice().sort((a, b) => a.order - b.order) : null;
+  const defaultCol = board ? (board.default_column || boardCols[0]?.id) : 'draft';
+  if (boardCols) {
+    $('tzStatus').innerHTML = boardCols.map((c) =>
+      `<option value="${esc(c.id)}"${c.id === defaultCol ? ' selected' : ''}>${esc(c.name)}</option>`
+    ).join('');
+  } else {
+    const transitions = cfg.transitions['draft'] || [];
+    const statusOptions = ['draft', ...transitions];
+    $('tzStatus').innerHTML = statusOptions.map((s) =>
+      `<option value="${esc(s)}"${s === 'draft' ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
+    ).join('');
+  }
   show(tzStatusRow);
   hide($('tzCompletionNotesRow'));
 
@@ -2089,12 +2189,20 @@ async function openTzDetail(id) {
     $('tzDateRelease').value = data.date_release_deadline || '';
     $('tzCompletionNotes').value = data.completion_notes || '';
 
-    // Status select — show only allowed transitions + current
-    const transitions = cfg.transitions[data.status] || [];
-    const statusOptions = [data.status, ...transitions];
-    $('tzStatus').innerHTML = statusOptions.map((s) =>
-      `<option value="${esc(s)}"${s === data.status ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
-    ).join('');
+    // Status select — use board columns if available
+    const detailBoard = data.board_id ? state.tzBoards.find(b => b.id === data.board_id) : getCurrentBoard();
+    if (detailBoard) {
+      const cols = detailBoard.columns.slice().sort((a, b) => a.order - b.order);
+      $('tzStatus').innerHTML = cols.map((c) =>
+        `<option value="${esc(c.id)}"${c.id === data.status ? ' selected' : ''}>${esc(c.name)}</option>`
+      ).join('');
+    } else {
+      const transitions = cfg.transitions[data.status] || [];
+      const statusOptions = [data.status, ...transitions];
+      $('tzStatus').innerHTML = statusOptions.map((s) =>
+        `<option value="${esc(s)}"${s === data.status ? ' selected' : ''}>${esc(cfg.statusLabels[s] || s)}</option>`
+      ).join('');
+    }
     show(tzStatusRow);
     show($('tzCompletionNotesRow'));
 
@@ -2185,8 +2293,8 @@ function renderTzHistory(history) {
     let oldV = h.old_value ?? '—';
     let newV = h.new_value ?? '—';
     if (h.field === 'status') {
-      oldV = cfg?.statusLabels?.[oldV] || oldV;
-      newV = cfg?.statusLabels?.[newV] || newV;
+      oldV = getBoardStatusLabel(oldV) || cfg?.statusLabels?.[oldV] || oldV;
+      newV = getBoardStatusLabel(newV) || cfg?.statusLabels?.[newV] || newV;
     }
     if (h.field === 'description' || h.field === 'completion_notes') {
       oldV = oldV.length > 40 ? oldV.slice(0, 40) + '...' : oldV;
@@ -2226,6 +2334,7 @@ tzForm.addEventListener('submit', async (e) => {
 
   try {
     body.status = $('tzStatus').value;
+    if (!state.tzEditId && state.tzBoardId) body.board_id = state.tzBoardId;
     if (state.tzEditId) {
       const result = await api(`/api/tz/${state.tzEditId}`, {
         method: 'PUT',
@@ -2340,21 +2449,28 @@ async function loadItStatus(ticketId) {
 
 /* ── Kanban view ── */
 
-const KANBAN_STATUS_COLORS = {
+// Fallback colors for legacy statuses
+const KANBAN_STATUS_COLORS_FALLBACK = {
   draft: '#edf2f7', review: '#fefcbf', analysis: '#bee3f8', development: '#c3dafe',
   testing: '#e9d8fd', release: '#feebc8', production: '#c6f6d5', partial: '#fde68a', cancelled: '#fed7d7'
 };
 
-const KANBAN_DISPLAY_ORDER = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'partial', 'cancelled'];
-
 function renderKanban(data) {
   if (!tzListContainer) return;
-  const { columns, transitions, statusLabels } = data;
+  const { columns, transitions, statusLabels, boardColumns } = data;
+
+  // Use board column order if available, else fallback to keys of columns
+  const displayOrder = boardColumns
+    ? boardColumns.filter(c => !c.hidden).sort((a, b) => a.order - b.order).map(c => c.id)
+    : Object.keys(columns);
+  const colorMap = boardColumns
+    ? Object.fromEntries(boardColumns.map(c => [c.id, c.color]))
+    : KANBAN_STATUS_COLORS_FALLBACK;
 
   let html = '<div class="kanban-board">';
-  for (const status of KANBAN_DISPLAY_ORDER) {
+  for (const status of displayOrder) {
     const cards = columns[status] || [];
-    const color = KANBAN_STATUS_COLORS[status] || '#edf2f7';
+    const color = colorMap[status] || '#edf2f7';
     const allowed = transitions[status] || [];
 
     html += `<div class="kanban-column" data-status="${esc(status)}" data-allowed="${esc(JSON.stringify(allowed))}">
@@ -2467,6 +2583,318 @@ function initKanbanDnD() {
       }
     });
   });
+}
+
+/* ── Board settings modal ── */
+
+function openCreateBoardModal() {
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay';
+  overlay.id = 'boardCreateOverlay';
+  overlay.innerHTML = `<div class="popup-card fade-in" style="max-width:420px">
+    <h3>Создать доску</h3>
+    <form id="boardCreateForm" class="popup-form">
+      <label>Название *<input id="bcName" required placeholder="Название доски" /></label>
+      <label>Префикс кода<input id="bcPrefix" placeholder="BD" maxlength="10" style="text-transform:uppercase" /></label>
+      <label>Описание<textarea id="bcDesc" rows="2" placeholder="Описание..."></textarea></label>
+      <div class="popup-actions">
+        <button type="submit" class="btn-primary">Создать</button>
+        <button type="button" class="btn-outline-dark" id="bcCancel">Отмена</button>
+      </div>
+      <p id="bcMsg" class="message"></p>
+    </form>
+  </div>`;
+  document.body.appendChild(overlay);
+
+  document.getElementById('bcCancel').addEventListener('click', () => overlay.remove());
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  document.getElementById('boardCreateForm').addEventListener('submit', async (e) => {
+    e.preventDefault();
+    const submitBtn = e.target.querySelector('[type="submit"]');
+    submitBtn.disabled = true;
+    try {
+      const result = await api('/api/boards', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          pin: state.pin,
+          name: document.getElementById('bcName').value.trim(),
+          code_prefix: document.getElementById('bcPrefix').value.trim() || 'BD',
+          description: document.getElementById('bcDesc').value.trim()
+        })
+      });
+      state.tzBoards.push(result.board);
+      if (state.tzConfig) state.tzConfig.boards = state.tzBoards;
+      state.tzBoardId = result.board.id;
+      overlay.remove();
+      renderTzFilters();
+      loadTzData();
+      showToast('Доска создана', 'ok');
+    } catch (err) {
+      msg(document.getElementById('bcMsg'), err.message, 'error');
+      submitBtn.disabled = false;
+    }
+  });
+}
+
+function openBoardSettingsModal() {
+  const board = getCurrentBoard();
+  if (!board) return;
+
+  const existing = document.getElementById('boardSettingsOverlay');
+  if (existing) existing.remove();
+
+  const overlay = document.createElement('div');
+  overlay.className = 'popup-overlay';
+  overlay.id = 'boardSettingsOverlay';
+
+  function renderSettingsContent() {
+    const cols = board.columns.slice().sort((a, b) => a.order - b.order);
+    return `<div class="popup-card fade-in board-settings-card">
+      <h3>Настройки доски: ${esc(board.name)}</h3>
+      <form id="bsForm" class="popup-form">
+        <div class="tz-form-grid">
+          <label>Название<input id="bsName" value="${esc(board.name)}" /></label>
+          <label>Префикс кода<input id="bsPrefix" value="${esc(board.code_prefix || '')}" maxlength="10" style="text-transform:uppercase" /></label>
+        </div>
+        <label>Описание<textarea id="bsDesc" rows="2">${esc(board.description || '')}</textarea></label>
+        <div class="popup-actions" style="margin-bottom:12px">
+          <button type="submit" class="btn-primary">Сохранить</button>
+          ${!board.is_default ? '<button type="button" class="btn-outline-dark" id="bsDeleteBoard" style="color:var(--danger)">Удалить доску</button>' : ''}
+          <button type="button" class="btn-outline-dark" id="bsClose">Закрыть</button>
+        </div>
+        <p id="bsMsg" class="message"></p>
+      </form>
+      <h4 style="margin:12px 0 8px">Колонки</h4>
+      <div class="board-columns-list" id="bsColList">
+        ${cols.map((c, i) => `<div class="board-col-row" data-col-id="${esc(c.id)}">
+          <span class="board-col-drag" title="Перетащить">&#x2630;</span>
+          <input type="color" class="board-col-color" value="${esc(c.color)}" data-col-id="${esc(c.id)}" title="Цвет" />
+          <input class="board-col-name" value="${esc(c.name)}" data-col-id="${esc(c.id)}" />
+          <button type="button" class="board-col-hide-btn" data-col-id="${esc(c.id)}" title="${c.hidden ? 'Показать' : 'Скрыть'}">${c.hidden ? '👁' : '👁‍🗨'}</button>
+          <button type="button" class="board-col-del-btn" data-col-id="${esc(c.id)}" title="Удалить">✕</button>
+        </div>`).join('')}
+      </div>
+      <div class="board-add-col-row" style="margin-top:8px;display:flex;gap:6px">
+        <input id="bsNewColName" placeholder="Новая колонка..." style="flex:1" />
+        <input id="bsNewColColor" type="color" value="#edf2f7" />
+        <button type="button" class="btn-primary btn-sm" id="bsAddCol">+</button>
+      </div>
+    </div>`;
+  }
+
+  overlay.innerHTML = renderSettingsContent();
+  document.body.appendChild(overlay);
+
+  // Bind overlay close once (not inside bindSettingsEvents to avoid listener stacking)
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+  function bindSettingsEvents() {
+    document.getElementById('bsClose')?.addEventListener('click', () => overlay.remove());
+
+    // Save board info
+    document.getElementById('bsForm')?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      try {
+        const result = await api(`/api/boards/${board.id}`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            pin: state.pin,
+            name: document.getElementById('bsName').value.trim(),
+            code_prefix: document.getElementById('bsPrefix').value.trim(),
+            description: document.getElementById('bsDesc').value.trim()
+          })
+        });
+        Object.assign(board, result.board);
+        const idx = state.tzBoards.findIndex(b => b.id === board.id);
+        if (idx >= 0) state.tzBoards[idx] = result.board;
+        msg(document.getElementById('bsMsg'), 'Сохранено', 'success');
+        renderTzFilters();
+      } catch (err) {
+        msg(document.getElementById('bsMsg'), err.message, 'error');
+      }
+    });
+
+    // Delete board
+    document.getElementById('bsDeleteBoard')?.addEventListener('click', async () => {
+      if (!confirm('Удалить доску? Это действие необратимо.')) return;
+      try {
+        await api(`/api/boards/${board.id}`, {
+          method: 'DELETE',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin })
+        });
+        state.tzBoards = state.tzBoards.filter(b => b.id !== board.id);
+        if (state.tzConfig) state.tzConfig.boards = state.tzBoards;
+        const def = state.tzBoards.find(b => b.is_default) || state.tzBoards[0];
+        state.tzBoardId = def?.id || null;
+        overlay.remove();
+        renderTzFilters();
+        loadTzData();
+        showToast('Доска удалена', 'ok');
+      } catch (err) {
+        msg(document.getElementById('bsMsg'), err.message, 'error');
+      }
+    });
+
+    // Column name edit (blur)
+    document.querySelectorAll('.board-col-name').forEach((inp) => {
+      inp.addEventListener('blur', async () => {
+        const colId = inp.dataset.colId;
+        const newName = inp.value.trim();
+        if (!newName) return;
+        try {
+          const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin, name: newName })
+          });
+          Object.assign(board, result.board);
+          const idx = state.tzBoards.findIndex(b => b.id === board.id);
+          if (idx >= 0) state.tzBoards[idx] = result.board;
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+
+    // Column color edit
+    document.querySelectorAll('.board-col-color').forEach((inp) => {
+      inp.addEventListener('change', async () => {
+        const colId = inp.dataset.colId;
+        try {
+          const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin, color: inp.value })
+          });
+          Object.assign(board, result.board);
+          const idx = state.tzBoards.findIndex(b => b.id === board.id);
+          if (idx >= 0) state.tzBoards[idx] = result.board;
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+
+    // Hide/show column
+    document.querySelectorAll('.board-col-hide-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const colId = btn.dataset.colId;
+        try {
+          const result = await api(`/api/boards/${board.id}/columns/${colId}/hide`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin })
+          });
+          Object.assign(board, result.board);
+          const idx = state.tzBoards.findIndex(b => b.id === board.id);
+          if (idx >= 0) state.tzBoards[idx] = result.board;
+          refreshSettings();
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+
+    // Delete column
+    document.querySelectorAll('.board-col-del-btn').forEach((btn) => {
+      btn.addEventListener('click', async () => {
+        const colId = btn.dataset.colId;
+        const cols = board.columns.filter(c => c.id !== colId);
+        if (cols.length === 0) { showToast('Нельзя удалить последнюю колонку', 'danger'); return; }
+        const targetCol = cols[0].id;
+        if (!confirm(`Удалить колонку? Карточки будут перенесены в «${cols[0].name}».`)) return;
+        try {
+          const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin, target_column: targetCol })
+          });
+          Object.assign(board, result.board);
+          const idx = state.tzBoards.findIndex(b => b.id === board.id);
+          if (idx >= 0) state.tzBoards[idx] = result.board;
+          refreshSettings();
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+
+    // Add column
+    document.getElementById('bsAddCol')?.addEventListener('click', async () => {
+      const name = document.getElementById('bsNewColName').value.trim();
+      const color = document.getElementById('bsNewColColor').value;
+      if (!name) return;
+      try {
+        const result = await api(`/api/boards/${board.id}/columns`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, name, color })
+        });
+        Object.assign(board, result.board);
+        const idx = state.tzBoards.findIndex(b => b.id === board.id);
+        if (idx >= 0) state.tzBoards[idx] = result.board;
+        refreshSettings();
+      } catch (err) { showToast(err.message, 'danger'); }
+    });
+
+    // Drag to reorder columns
+    initColumnDnD();
+  }
+
+  function initColumnDnD() {
+    const list = document.getElementById('bsColList');
+    if (!list) return;
+    let dragEl = null;
+
+    list.querySelectorAll('.board-col-row').forEach((row) => {
+      row.draggable = true;
+      row.addEventListener('dragstart', (e) => {
+        dragEl = row;
+        row.classList.add('dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      row.addEventListener('dragend', () => {
+        row.classList.remove('dragging');
+        dragEl = null;
+        list.querySelectorAll('.board-col-row').forEach(r => r.classList.remove('drag-over'));
+      });
+      row.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        if (dragEl && dragEl !== row) {
+          row.classList.add('drag-over');
+          e.dataTransfer.dropEffect = 'move';
+        }
+      });
+      row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+      row.addEventListener('drop', async (e) => {
+        e.preventDefault();
+        row.classList.remove('drag-over');
+        if (!dragEl || dragEl === row) return;
+        // Determine new order
+        const rows = [...list.querySelectorAll('.board-col-row')];
+        const fromIdx = rows.indexOf(dragEl);
+        const toIdx = rows.indexOf(row);
+        if (fromIdx < toIdx) row.after(dragEl);
+        else row.before(dragEl);
+        // Send new order to server
+        const newRows = [...list.querySelectorAll('.board-col-row')];
+        const order = newRows.map((r, i) => ({ id: r.dataset.colId, order: i }));
+        try {
+          const result = await api(`/api/boards/${board.id}/columns/reorder`, {
+            method: 'PATCH',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin, order })
+          });
+          Object.assign(board, result.board);
+          const idx = state.tzBoards.findIndex(b => b.id === board.id);
+          if (idx >= 0) state.tzBoards[idx] = result.board;
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+  }
+
+  function refreshSettings() {
+    overlay.innerHTML = renderSettingsContent();
+    bindSettingsEvents();
+  }
+
+  bindSettingsEvents();
 }
 
 /* ── Knowledge Base (Wiki) ── */
