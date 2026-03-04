@@ -62,8 +62,8 @@
         <form id="loginForm" class="auth-form">
           <label>
             Пин-код
-            <input id="pinInput" name="pin" type="text" inputmode="numeric" maxlength="4"
-                   pattern="\d{4}" placeholder="4 цифры" required autocomplete="off" />
+            <input id="pinInput" name="pin" type="password" inputmode="numeric" maxlength="4"
+                   pattern="\d{4}" placeholder="****" required autocomplete="off" />
           </label>
           <button type="submit" class="btn-primary">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4"/><polyline points="10 17 15 12 10 7"/><line x1="15" y1="12" x2="3" y2="12"/></svg>
@@ -105,8 +105,8 @@
             </label>
             <label>
               Придумайте пин-код (4 цифры)
-              <input name="pin" type="text" inputmode="numeric" maxlength="4"
-                     pattern="\d{4}" placeholder="1234" required autocomplete="off" />
+              <input name="pin" type="password" inputmode="numeric" maxlength="4"
+                     pattern="\d{4}" placeholder="****" required autocomplete="off" />
               <small class="hint">Запомните пин — он понадобится для входа каждый раз</small>
             </label>
             <button type="submit" class="btn-primary">Зарегистрироваться</button>
@@ -132,14 +132,14 @@
             </div>
           </div>
         </div>
-        <div class="topbar-center">
+        <div class="topbar-right">
           <div class="global-search-wrap" id="globalSearchWrap">
-            <svg class="global-search-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
-            <input id="globalSearchInput" class="global-search-input" type="search" placeholder="Поиск..." autocomplete="off" />
+            <button type="button" id="globalSearchToggle" class="btn-icon" title="Поиск (ТЗ, Wiki, заявки)">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="8"/><line x1="21" y1="21" x2="16.65" y2="16.65"/></svg>
+            </button>
+            <input id="globalSearchInput" class="global-search-input hidden" type="search" placeholder="ТЗ, статьи, заявки..." autocomplete="off" />
             <div id="globalSearchResults" class="global-search-results hidden"></div>
           </div>
-        </div>
-        <div class="topbar-right">
           <button id="adminBtn" type="button" class="btn-accent hidden" title="Админка">
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 20h9"/><path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"/></svg>
             Отчёты
@@ -401,7 +401,7 @@
           </label>
           <label>
             Пин-код
-            <input id="editUserPin" type="text" inputmode="numeric" maxlength="4" pattern="\d{4}" required />
+            <input id="editUserPin" type="password" inputmode="numeric" maxlength="4" pattern="\d{4}" required />
           </label>
           <div class="popup-actions">
             <button type="submit" class="btn-primary">Сохранить</button>

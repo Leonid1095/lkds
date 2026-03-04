@@ -3731,17 +3731,29 @@ async function loadTzTemplates() {
 
 function initGlobalSearch() {
   if (!globalSearchInput) return;
+  const toggleBtn = $('globalSearchToggle');
+  if (toggleBtn) {
+    toggleBtn.addEventListener('click', () => {
+      globalSearchInput.classList.toggle('hidden');
+      if (!globalSearchInput.classList.contains('hidden')) {
+        globalSearchInput.focus();
+      } else {
+        globalSearchInput.value = '';
+        hide(globalSearchResults);
+      }
+    });
+  }
   globalSearchInput.addEventListener('input', () => {
     clearTimeout(_globalSearchTimer);
     const q = globalSearchInput.value.trim();
     if (q.length < 2) { hide(globalSearchResults); return; }
     _globalSearchTimer = setTimeout(() => performGlobalSearch(q), 300);
   });
-  globalSearchInput.addEventListener('focus', () => {
-    if (globalSearchInput.value.trim().length >= 2) performGlobalSearch(globalSearchInput.value.trim());
+  globalSearchInput.addEventListener('keydown', (e) => {
+    if (e.key === 'Escape') { globalSearchInput.value = ''; hide(globalSearchResults); globalSearchInput.classList.add('hidden'); }
   });
   document.addEventListener('click', (e) => {
-    if (!e.target.closest('#globalSearchWrap')) hide(globalSearchResults);
+    if (!e.target.closest('#globalSearchWrap')) { hide(globalSearchResults); globalSearchInput.classList.add('hidden'); globalSearchInput.value = ''; }
   });
 }
 
@@ -3874,17 +3886,42 @@ function renderMetrics(data) {
   _metricsChartInstances.forEach((c) => c.destroy());
   _metricsChartInstances = [];
 
+  const donePercent = data.total ? Math.round((data.totalDone / data.total) * 100) : 0;
+  const inWork = data.total - data.totalDone;
+
   metricsContent.innerHTML = `
     <div class="metrics-summary">
-      <div class="metrics-card"><div class="metrics-num">${data.total}</div><div class="metrics-label">Всего ТЗ</div></div>
-      <div class="metrics-card"><div class="metrics-num">${data.totalDone}</div><div class="metrics-label">Завершено</div></div>
-      <div class="metrics-card"><div class="metrics-num">${data.avgCycleTime}д</div><div class="metrics-label">Ср. цикл</div></div>
+      <div class="metrics-card">
+        <div class="metrics-num">${data.total}</div>
+        <div class="metrics-label">Всего задач</div>
+      </div>
+      <div class="metrics-card metrics-card-accent">
+        <div class="metrics-num">${inWork}</div>
+        <div class="metrics-label">В работе</div>
+      </div>
+      <div class="metrics-card metrics-card-success">
+        <div class="metrics-num">${data.totalDone}</div>
+        <div class="metrics-label">Завершено</div>
+      </div>
+      <div class="metrics-card">
+        <div class="metrics-num">${data.avgCycleTime}<small>д</small></div>
+        <div class="metrics-label">Ср. цикл выполнения</div>
+      </div>
+    </div>
+    <div class="metrics-progress-wrap">
+      <div class="metrics-progress-header">
+        <span>Прогресс завершения</span>
+        <span class="metrics-progress-pct">${donePercent}%</span>
+      </div>
+      <div class="metrics-progress-bar">
+        <div class="metrics-progress-fill" style="width:${donePercent}%"></div>
+      </div>
     </div>
     <div class="metrics-charts">
-      <div class="metrics-chart-wrap"><h4>Созданы по неделям</h4><canvas id="chartCreatedPerWeek"></canvas></div>
-      <div class="metrics-chart-wrap"><h4>По статусам</h4><canvas id="chartStatus"></canvas></div>
-      <div class="metrics-chart-wrap"><h4>По приоритетам</h4><canvas id="chartPriority"></canvas></div>
-      <div class="metrics-chart-wrap"><h4>По типам</h4><canvas id="chartType"></canvas></div>
+      <div class="metrics-chart-wrap metrics-chart-wide"><h4>Динамика создания задач</h4><canvas id="chartCreatedPerWeek"></canvas></div>
+      <div class="metrics-chart-wrap"><h4>Распределение по статусам</h4><canvas id="chartStatus"></canvas></div>
+      <div class="metrics-chart-wrap"><h4>Распределение по приоритетам</h4><canvas id="chartPriority"></canvas></div>
+      <div class="metrics-chart-wrap"><h4>Распределение по типам</h4><canvas id="chartType"></canvas></div>
     </div>`;
 
   if (typeof Chart === 'undefined') return;
