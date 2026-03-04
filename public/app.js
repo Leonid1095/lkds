@@ -497,7 +497,6 @@ async function loadApp() {
   if (state.adminRole === 'superadmin' && state.tzConfig) {
     renderTzFilters();
   }
-
   dateInput.value = getToday();
   await loadBookings();
 }
@@ -1758,15 +1757,19 @@ function renderTzFilters() {
       <select class="tz-filter-select" id="tzFilterType">${typeOpts}</select>
       <select class="tz-filter-select" id="tzFilterPriority">${prioOpts}</select>
       <input class="tz-filter-search" id="tzFilterSearch" placeholder="Поиск..." value="${esc(f.search)}" />
-      <button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
-      <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать ТЗ</button>
-      <div class="tz-view-toggle">
+      <div class="tz-filter-actions">
+        <button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
+        <button class="tz-export-btn" id="tzImportBtn" type="button">&#x1F4E4; Импорт</button>
+        <input type="file" id="tzImportFile" accept=".xlsx" style="display:none" />
+        <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать</button>
+        <div class="tz-view-toggle">
         <button type="button" class="tz-view-btn${state.tzViewMode === 'list' ? ' active' : ''}" data-view="list" title="Список">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><line x1="8" y1="6" x2="21" y2="6"/><line x1="8" y1="12" x2="21" y2="12"/><line x1="8" y1="18" x2="21" y2="18"/><line x1="3" y1="6" x2="3.01" y2="6"/><line x1="3" y1="12" x2="3.01" y2="12"/><line x1="3" y1="18" x2="3.01" y2="18"/></svg>
         </button>
         <button type="button" class="tz-view-btn${state.tzViewMode === 'kanban' ? ' active' : ''}" data-view="kanban" title="Канбан">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="5" height="18" rx="1"/><rect x="10" y="3" width="5" height="12" rx="1"/><rect x="17" y="3" width="5" height="15" rx="1"/></svg>
         </button>
+      </div>
       </div>
     </div>
     <div class="tz-filters-row">
@@ -1806,6 +1809,13 @@ function renderTzFilters() {
 
   const exportBtn = document.getElementById('tzExportBtn');
   if (exportBtn) exportBtn.addEventListener('click', exportTzExcel);
+
+  const importBtn = document.getElementById('tzImportBtn');
+  const importFile = document.getElementById('tzImportFile');
+  if (importBtn && importFile) {
+    importBtn.addEventListener('click', () => importFile.click());
+    importFile.addEventListener('change', () => { if (importFile.files.length) importTzExcel(importFile); });
+  }
 
   // View toggle
   document.querySelectorAll('.tz-view-btn').forEach((btn) => {
@@ -1852,6 +1862,29 @@ async function exportTzExcel() {
   }
 }
 
+async function importTzExcel(input) {
+  const btn = document.getElementById('tzImportBtn');
+  if (btn) btn.disabled = true;
+  try {
+    const fd = new FormData();
+    fd.append('file', input.files[0]);
+    fd.append('pin', state.pin);
+    const res = await fetch('/api/admin/tz-import', { method: 'POST', body: fd });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.message || 'Ошибка импорта');
+    msg(tzMessage, data.message + ' Результат появится во вкладке AI.', 'success');
+    // Switch to AI tab to show progress
+    const aiTab = document.querySelector('[data-tab="ai"]');
+    if (aiTab) aiTab.click();
+    loadAiTasks();
+  } catch (err) {
+    msg(tzMessage, err.message, 'error');
+  } finally {
+    if (btn) btn.disabled = false;
+    input.value = '';
+  }
+}
+
 function renderTzStats(stats) {
   if (!tzStatsBar) return;
   const overduePulse = stats.overdue > 0 ? ' tz-stat-pulse' : '';
@@ -1895,7 +1928,7 @@ function renderTzList(items) {
       <td>${esc(tz.type)}</td>
       <td>${tzPrioBadge(tz.priority)}</td>
       <td>${tzStatusBadge(tz.status)}</td>
-      <td>${tz.owner ? esc(tz.owner) : '<span style="color:var(--disabled)">—</span>'}</td>
+      <td>${tz.assignee_name ? esc(tz.assignee_name) : (tz.owner ? esc(tz.owner) : '<span style="color:var(--disabled)">—</span>')}</td>
       <td>${links.join(' ') || '—'}</td>
     </tr>`;
   }
@@ -1917,7 +1950,7 @@ async function loadTzData() {
         api('/api/admin/tz-kanban', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, system: state.tzFilters.system, type: state.tzFilters.type, priority: state.tzFilters.priority, search: state.tzFilters.search })
+          body: JSON.stringify({ pin: state.pin, ...state.tzFilters })
         }),
         api('/api/admin/tz-stats', {
           method: 'POST',
@@ -1952,20 +1985,41 @@ async function loadTzData() {
   }
 }
 
-function openTzCreateForm() {
+function openTzCreateForm(presetType) {
   state.tzEditId = null;
   const cfg = state.tzConfig;
-  tzPopupTitle.querySelector('span').textContent = 'Новое ТЗ';
+  const isSA = state.adminRole === 'superadmin';
+  const type = presetType || (isSA ? 'ТЗ' : 'Задача');
+  const isUserType = (cfg.userTypes || []).includes(type);
+  const typeLabel = { 'ТЗ': 'ТЗ', 'Дефект': 'Дефект', 'Заявка': 'Заявку', 'Задача': 'Задачу', 'Недоработка': 'Недоработку', 'Предложение': 'Предложение' };
+
+  tzPopupTitle.querySelector('span').textContent = 'Создать: ' + (typeLabel[type] || type);
   tzSubmitBtn.textContent = 'Создать';
   tzForm.reset();
   hide(tzMeta);
   hide(tzHistorySection);
   msg(tzPopupMessage, '');
+  hide($('tzApproveRow'));
 
   // Populate selects
   $('tzSystem').innerHTML = cfg.systems.map((s) => `<option value="${esc(s)}">${esc(s)}</option>`).join('');
-  $('tzType').innerHTML = cfg.types.map((t) => `<option value="${esc(t)}">${esc(t)}</option>`).join('');
+
+  // Types: superadmin sees all, regular user sees only userTypes
+  const availableTypes = isSA ? cfg.types : (cfg.userTypes || []);
+  $('tzType').innerHTML = availableTypes.map((t) => `<option value="${esc(t)}"${t === type ? ' selected' : ''}>${esc(t)}</option>`).join('');
   $('tzPriority').innerHTML = cfg.priorities.map((p) => `<option value="${esc(p)}">${esc(TZ_PRIO_LABELS[p] || p)}</option>`).join('');
+
+  // Assignee select
+  populateAssigneeSelect('');
+
+  // Show/hide fields based on type
+  const systemRow = $('tzSystem').closest('label');
+  if (isUserType) { systemRow.style.display = 'none'; $('tzSystem').value = 'OTHER'; }
+  else systemRow.style.display = '';
+
+  // Show assignee for user types, owner for classic
+  $('tzAssigneeRow').style.display = isUserType ? '' : 'none';
+  $('tzOwnerRow').style.display = isUserType ? 'none' : '';
 
   // Status select — draft + допустимые переходы
   const transitions = cfg.transitions['draft'] || [];
@@ -1976,7 +2030,24 @@ function openTzCreateForm() {
   show(tzStatusRow);
   hide($('tzCompletionNotesRow'));
 
+  // Bind type change to toggle fields
+  $('tzType').onchange = () => {
+    const t = $('tzType').value;
+    const ut = (cfg.userTypes || []).includes(t);
+    systemRow.style.display = ut ? 'none' : '';
+    $('tzAssigneeRow').style.display = ut ? '' : 'none';
+    $('tzOwnerRow').style.display = ut ? 'none' : '';
+    if (ut) $('tzSystem').value = 'OTHER';
+  };
+
   show(tzPopup);
+}
+
+function populateAssigneeSelect(selectedId) {
+  const cfg = state.tzConfig;
+  if (!cfg || !cfg.users) return;
+  $('tzAssignee').innerHTML = '<option value="">— не назначен —</option>' +
+    cfg.users.map(u => `<option value="${esc(u.id)}"${u.id === selectedId ? ' selected' : ''}>${esc(u.fullName)}</option>`).join('');
 }
 
 async function openTzDetail(id) {
@@ -1985,14 +2056,27 @@ async function openTzDetail(id) {
     const data = await api(`/api/tz/${id}?pin=${encodeURIComponent(state.pin)}`);
     state.tzEditId = id;
     const cfg = state.tzConfig;
+    const isSA = state.adminRole === 'superadmin';
+    const isUserType = (cfg.userTypes || []).includes(data.type);
 
-    tzPopupTitle.querySelector('span').textContent = `${data.tz_code} — Редактирование`;
+    tzPopupTitle.querySelector('span').textContent = `${data.tz_code} — ${data.type}`;
     tzSubmitBtn.textContent = 'Сохранить';
 
     // Populate selects
     $('tzSystem').innerHTML = cfg.systems.map((s) => `<option value="${esc(s)}"${s === data.system ? ' selected' : ''}>${esc(s)}</option>`).join('');
-    $('tzType').innerHTML = cfg.types.map((t) => `<option value="${esc(t)}"${t === data.type ? ' selected' : ''}>${esc(t)}</option>`).join('');
+    const availableTypes = isSA ? cfg.types : (cfg.userTypes || []);
+    $('tzType').innerHTML = availableTypes.map((t) => `<option value="${esc(t)}"${t === data.type ? ' selected' : ''}>${esc(t)}</option>`).join('');
     $('tzPriority').innerHTML = cfg.priorities.map((p) => `<option value="${esc(p)}"${p === data.priority ? ' selected' : ''}>${esc(TZ_PRIO_LABELS[p] || p)}</option>`).join('');
+
+    // Show/hide fields based on type
+    const systemRow = $('tzSystem').closest('label');
+    systemRow.style.display = isUserType ? 'none' : '';
+    $('tzAssigneeRow').style.display = isUserType ? '' : 'none';
+    $('tzOwnerRow').style.display = isUserType ? 'none' : '';
+
+    // Assignee
+    populateAssigneeSelect(data.assignee_id || '');
+    $('tzDeadline').value = data.deadline || '';
 
     // Fill form
     $('tzTitle').value = data.title || '';
@@ -2014,11 +2098,60 @@ async function openTzDetail(id) {
     show(tzStatusRow);
     show($('tzCompletionNotesRow'));
 
+    // Approval info for Предложение
+    const approveRow = $('tzApproveRow');
+    if (data.type === 'Предложение') {
+      if (!approveRow) {
+        // Create approve row dynamically
+        const row = document.createElement('div');
+        row.id = 'tzApproveRow';
+        row.className = 'tz-approve-row';
+        tzMeta.parentNode.insertBefore(row, tzMeta);
+      }
+      const ar = $('tzApproveRow');
+      if (data.approved) {
+        ar.innerHTML = `<span class="tz-approved-badge">Утверждено</span> <small>${esc(data.approved_by_name || '')} ${data.approved_at ? fmtDate(data.approved_at) : ''}</small>`;
+      } else if (isSA) {
+        ar.innerHTML = `<span class="tz-pending-badge">Ожидает утверждения</span> <button type="button" class="btn-primary btn-sm" id="tzApproveBtn">Утвердить</button>`;
+        const btn = $('tzApproveBtn');
+        if (btn) btn.addEventListener('click', async () => {
+          btn.disabled = true;
+          try {
+            const result = await api(`/api/tz/${id}/approve`, {
+              method: 'PATCH',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ pin: state.pin })
+            });
+            msg(tzPopupMessage, result.message, 'success');
+            setTimeout(() => openTzDetail(id), 600);
+          } catch (err) { msg(tzPopupMessage, err.message, 'error'); btn.disabled = false; }
+        });
+      } else {
+        ar.innerHTML = '<span class="tz-pending-badge">Ожидает утверждения руководителем</span>';
+      }
+      show(ar);
+    } else if (approveRow) {
+      hide(approveRow);
+    }
+
+    // Bind type change
+    $('tzType').onchange = () => {
+      const t = $('tzType').value;
+      const ut = (cfg.userTypes || []).includes(t);
+      systemRow.style.display = ut ? 'none' : '';
+      $('tzAssigneeRow').style.display = ut ? '' : 'none';
+      $('tzOwnerRow').style.display = ut ? 'none' : '';
+      if (ut) $('tzSystem').value = 'OTHER';
+    };
+
     // Meta info
-    tzMeta.innerHTML = `
+    let metaHtml = `
       <span>Создано: ${fmtDate(data.created_at)}</span>
       <span>Автор: ${esc(data.created_by || '—')}</span>
       <span>Обновлено: ${fmtDate(data.updated_at)}</span>`;
+    if (data.assignee_name) metaHtml += `<span>Исполнитель: ${esc(data.assignee_name)}</span>`;
+    if (data.assigned_by_name) metaHtml += `<span>Назначил: ${esc(data.assigned_by_name)}</span>`;
+    tzMeta.innerHTML = metaHtml;
     show(tzMeta);
 
     // History
@@ -2043,7 +2176,8 @@ function renderTzHistory(history) {
     status: 'Статус', description: 'Описание', owner: 'Ответственный',
     link_confluence: 'Confluence', link_jira: 'Jira',
     date_analysis_deadline: 'Дедлайн анализа', date_dev_deadline: 'Дедлайн разработки',
-    date_release_deadline: 'Дедлайн релиза', completion_notes: 'Примечания к выполнению'
+    date_release_deadline: 'Дедлайн релиза', completion_notes: 'Примечания к выполнению',
+    assignee_id: 'Исполнитель', deadline: 'Дедлайн', approved: 'Утверждение'
   };
 
   tzHistoryList.innerHTML = history.map((h) => {
@@ -2085,7 +2219,9 @@ tzForm.addEventListener('submit', async (e) => {
     date_analysis_deadline: $('tzDateAnalysis').value || '',
     date_dev_deadline: $('tzDateDev').value || '',
     date_release_deadline: $('tzDateRelease').value || '',
-    completion_notes: $('tzCompletionNotes').value.trim()
+    completion_notes: $('tzCompletionNotes').value.trim(),
+    assignee_id: $('tzAssignee').value || '',
+    deadline: $('tzDeadline').value || ''
   };
 
   try {
@@ -2239,7 +2375,7 @@ function renderKanban(data) {
         <div class="kanban-card-body">
           <div class="kanban-card-code">${esc(tz.tz_code)}</div>
           <div class="kanban-card-title">${esc(tz.title)}</div>
-          ${tz.owner ? `<div class="kanban-card-owner">${esc(tz.owner)}</div>` : ''}
+          ${tz.assignee_name ? `<div class="kanban-card-owner">${esc(tz.assignee_name)}</div>` : (tz.owner ? `<div class="kanban-card-owner">${esc(tz.owner)}</div>` : '')}
           ${tz.completion_notes ? '<span class="kanban-flag kanban-flag-notes" title="Есть примечания к выполнению">📝 Примечания</span>' : ''}
           ${flagsHtml}
         </div>

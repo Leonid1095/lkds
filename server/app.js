@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createTransport } from 'nodemailer';
 import ExcelJS from 'exceljs';
-import { computeTzFlags as _computeTzFlags, TZ_STATUS_ORD as _TZ_STATUS_ORD, TZ_STATUS_LABELS as _TZ_STATUS_LABELS } from './utils.js';
+import { computeTzFlags as _computeTzFlags, TZ_STATUS_ORD as _TZ_STATUS_ORD, TZ_STATUS_LABELS as _TZ_STATUS_LABELS, TZ_STATUSES as _TZ_STATUSES, TZ_TYPES as _TZ_TYPES, TZ_USER_TYPES as _TZ_USER_TYPES } from './utils.js';
 
 dotenv.config();
 
@@ -440,8 +440,9 @@ function clip(str, max) { return str.length > max ? str.slice(0, max) : str; }
 /* ── TZ constants ── */
 
 const TZ_SYSTEMS = ['ALIS', 'TOS', 'WMS', '1C_CRM', 'OTHER'];
-const TZ_TYPES = ['ТЗ', 'Дефект', 'Заявка'];
-const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'cancelled'];
+const TZ_TYPES = _TZ_TYPES;
+const TZ_USER_TYPES = _TZ_USER_TYPES;
+const TZ_STATUSES = _TZ_STATUSES;
 const TZ_PRIORITIES = ['low', 'medium', 'high', 'critical'];
 
 // Free-form transitions (Jira-style): any status → any other status
@@ -1353,25 +1354,38 @@ app.patch('/api/bookings/:id', async (req, res) => {
 
 /* ── TZ (Технические задания) ── */
 
-app.get('/api/tz-config', (_req, res) => {
+app.get('/api/tz-config', async (_req, res) => {
+  const users = await readJson(FILES.users, []);
+  const usersList = users.map(u => ({ id: u.id, fullName: u.fullName }));
   res.json({
     systems: TZ_SYSTEMS,
     types: TZ_TYPES,
+    userTypes: TZ_USER_TYPES,
     statuses: TZ_STATUSES,
     priorities: TZ_PRIORITIES,
     statusLabels: TZ_STATUS_LABELS,
-    transitions: TZ_TRANSITIONS
+    transitions: TZ_TRANSITIONS,
+    users: usersList
   });
 });
 
 app.post('/api/tz', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const authUser = await requireSuperAdmin(pin);
-  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+  const type = String(req.body.type || '').trim();
+  const isUserType = TZ_USER_TYPES.includes(type);
+
+  // User types can be created by any authenticated user; classic types require superadmin
+  let authUser;
+  if (isUserType) {
+    authUser = await getUserByPin(pin);
+    if (!authUser) return res.status(403).json({ message: 'Требуется авторизация.' });
+  } else {
+    authUser = await requireSuperAdmin(pin);
+    if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+  }
 
   const title = clip(String(req.body.title || '').trim(), 300);
   const system = String(req.body.system || '').trim();
-  const type = String(req.body.type || '').trim();
   const priority = String(req.body.priority || '').trim();
   const description = clip(String(req.body.description || '').trim(), 5000);
   const owner = clip(String(req.body.owner || '').trim(), 100);
@@ -1382,14 +1396,18 @@ app.post('/api/tz', async (req, res) => {
   const date_dev_deadline = String(req.body.date_dev_deadline || '').trim();
   const date_release_deadline = String(req.body.date_release_deadline || '').trim();
   const reqStatus = String(req.body.status || '').trim();
+  const assignee_id = String(req.body.assignee_id || '').trim() || null;
+  const deadline = String(req.body.deadline || '').trim() || null;
 
   if (!title || title.length < 3) return res.status(400).json({ message: 'Название ТЗ минимум 3 символа.' });
-  if (!TZ_SYSTEMS.includes(system)) return res.status(400).json({ message: 'Выберите систему.' });
+  if (!isUserType && !TZ_SYSTEMS.includes(system)) return res.status(400).json({ message: 'Выберите систему.' });
   if (!TZ_TYPES.includes(type)) return res.status(400).json({ message: 'Выберите тип.' });
   if (!TZ_PRIORITIES.includes(priority)) return res.status(400).json({ message: 'Выберите приоритет.' });
   if (date_analysis_deadline && !isValidDate(date_analysis_deadline)) return res.status(400).json({ message: 'Дата анализа: YYYY-MM-DD.' });
   if (date_dev_deadline && !isValidDate(date_dev_deadline)) return res.status(400).json({ message: 'Дата разработки: YYYY-MM-DD.' });
   if (date_release_deadline && !isValidDate(date_release_deadline)) return res.status(400).json({ message: 'Дата релиза: YYYY-MM-DD.' });
+  if (deadline && !isValidDate(deadline)) return res.status(400).json({ message: 'Дедлайн: YYYY-MM-DD.' });
+  if (assignee_id && !UUID_RE.test(assignee_id)) return res.status(400).json({ message: 'Некорректный ID исполнителя.' });
 
   // Валидация статуса при создании: пустой → draft, иначе должен быть допустимым переходом из draft
   let initialStatus = 'draft';
@@ -1408,14 +1426,14 @@ app.post('/api/tz', async (req, res) => {
     const duplicate = allTz.find((t) => t.title.toLowerCase() === title.toLowerCase());
     if (duplicate) return res.status(400).json({ message: `ТЗ с таким названием уже существует: ${duplicate.tz_code}.` });
 
-    const tzCode = generateTzCode(allTz, system);
+    const tzCode = generateTzCode(allTz, system || 'OTHER');
     const creatorName = authUser.fullName || pin;
 
     const tz = {
       id: randomUUID(),
       tz_code: tzCode,
       title,
-      system,
+      system: system || (isUserType ? 'OTHER' : system),
       type,
       priority,
       status: initialStatus,
@@ -1427,24 +1445,52 @@ app.post('/api/tz', async (req, res) => {
       date_analysis_deadline: date_analysis_deadline || null,
       date_dev_deadline: date_dev_deadline || null,
       date_release_deadline: date_release_deadline || null,
+      assignee_id: assignee_id || null,
+      assigned_by_id: assignee_id ? authUser.id : null,
+      deadline: deadline || null,
       created_by: creatorName,
+      created_by_id: authUser.id,
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
 
+    // For Предложение, start as draft (awaiting approval)
+    if (type === 'Предложение') {
+      tz.approved = false;
+      tz.approved_by = null;
+      tz.approved_at = null;
+    }
+
     allTz.push(tz);
     await writeJson(FILES.tz, allTz);
 
-    return res.status(201).json({ message: `ТЗ ${tzCode} создано.`, tz });
+    return res.status(201).json({ message: `${type} ${tzCode} создано.`, tz });
   });
 });
 
 app.put('/api/tz/:id', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const authUser = await requireSuperAdmin(pin);
-  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
-
   const id = req.params.id;
+
+  // Read TZ first to check type
+  const allTzPre = await readJson(FILES.tz, []);
+  const tzPre = allTzPre.find((t) => t.id === id);
+  if (!tzPre) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+  const isUserType = TZ_USER_TYPES.includes(tzPre.type);
+  let authUser;
+  if (isUserType) {
+    authUser = await getUserByPin(pin);
+    if (!authUser) return res.status(403).json({ message: 'Требуется авторизация.' });
+    // Non-superadmin can only edit their own items or items assigned to them
+    const isSA = isSuperAdmin(pin, authUser);
+    if (!isSA && tzPre.created_by_id !== authUser.id && tzPre.assignee_id !== authUser.id) {
+      return res.status(403).json({ message: 'Вы можете редактировать только свои записи.' });
+    }
+  } else {
+    authUser = await requireSuperAdmin(pin);
+    if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+  }
 
   return withLock(FILES.tz, async () => {
     const allTz = await readJson(FILES.tz, []);
@@ -1456,7 +1502,8 @@ app.put('/api/tz/:id', async (req, res) => {
     const editableFields = [
       'title', 'system', 'type', 'priority', 'status',
       'description', 'owner', 'link_confluence', 'link_jira', 'completion_notes',
-      'date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline'
+      'date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline',
+      'assignee_id', 'deadline'
     ];
 
     // Status transition check
@@ -1476,7 +1523,7 @@ app.put('/api/tz/:id', async (req, res) => {
       const duplicate = allTz.find((x) => x.id !== id && x.title.toLowerCase() === t.toLowerCase());
       if (duplicate) return res.status(400).json({ message: `ТЗ с таким названием уже существует: ${duplicate.tz_code}.` });
     }
-    if (req.body.system !== undefined && !TZ_SYSTEMS.includes(req.body.system))
+    if (req.body.system !== undefined && !isUserType && !TZ_SYSTEMS.includes(req.body.system))
       return res.status(400).json({ message: 'Выберите систему.' });
     if (req.body.type !== undefined && !TZ_TYPES.includes(req.body.type))
       return res.status(400).json({ message: 'Выберите тип.' });
@@ -1492,9 +1539,17 @@ app.put('/api/tz/:id', async (req, res) => {
       if (field === 'link_confluence') newVal = clip(newVal, 500);
       if (field === 'link_jira') newVal = clip(newVal, 500);
       if (field === 'completion_notes') newVal = clip(newVal, 5000);
-      if (['date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline'].includes(field)) {
+      if (['date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline', 'deadline'].includes(field)) {
         if (newVal && !isValidDate(newVal)) continue;
         newVal = newVal || null;
+      }
+      if (field === 'assignee_id') {
+        newVal = newVal || null;
+        if (newVal && !UUID_RE.test(newVal)) continue;
+        // Track who assigned
+        if (newVal && newVal !== (tz.assignee_id || null)) {
+          tz.assigned_by_id = authUser.id;
+        }
       }
 
       const oldVal = tz[field] ?? null;
@@ -1511,7 +1566,7 @@ app.put('/api/tz/:id', async (req, res) => {
   });
 });
 
-function filterTz(allTz, body) {
+function filterTz(allTz, body, usersMap) {
   const fSystem = String(body.system || '').trim();
   const fStatus = String(body.status || '').trim();
   const fType = String(body.type || '').trim();
@@ -1522,18 +1577,25 @@ function filterTz(allTz, body) {
   const fNoOwner = !!body.no_owner;
   const fDeadlineSoon = !!body.deadline_soon;
   const fMissingDeadline = !!body.missing_deadline;
+  const fAssignee = String(body.assignee_id || '').trim();
 
-  let items = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+  let items = allTz.map((tz) => {
+    const item = { ...tz, flags: computeTzFlags(tz) };
+    if (usersMap && tz.assignee_id) item.assignee_name = usersMap.get(tz.assignee_id) || null;
+    return item;
+  });
 
   if (fSystem) items = items.filter((t) => t.system === fSystem);
   if (fStatus) items = items.filter((t) => t.status === fStatus);
   if (fType) items = items.filter((t) => t.type === fType);
   if (fPriority) items = items.filter((t) => t.priority === fPriority);
+  if (fAssignee) items = items.filter((t) => t.assignee_id === fAssignee);
   if (fSearch) items = items.filter((t) =>
     (t.title && t.title.toLowerCase().includes(fSearch)) ||
     (t.tz_code && t.tz_code.toLowerCase().includes(fSearch)) ||
     (t.owner && t.owner.toLowerCase().includes(fSearch)) ||
-    (t.description && t.description.toLowerCase().includes(fSearch))
+    (t.description && t.description.toLowerCase().includes(fSearch)) ||
+    (t.assignee_name && t.assignee_name.toLowerCase().includes(fSearch))
   );
   if (fOverdue) items = items.filter((t) => t.flags.overdue);
   if (fNoDates) items = items.filter((t) => t.flags.no_dates);
@@ -1549,26 +1611,77 @@ app.post('/api/admin/tz', async (req, res) => {
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
-  const items = filterTz(allTz, req.body);
+  const users = await readJson(FILES.users, []);
+  const usersMap = new Map(users.map(u => [u.id, u.fullName]));
+  const items = filterTz(allTz, req.body, usersMap);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
   const { page, pageSize } = req.body;
   return res.json(paginate(items, page, pageSize));
 });
 
+/* ── Approve Предложение (superadmin only) ── */
+
+app.patch('/api/tz/:id/approve', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    const tz = allTz.find(t => t.id === id);
+    if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
+    if (tz.type !== 'Предложение') return res.status(400).json({ message: 'Утверждение доступно только для Предложений.' });
+    if (tz.approved) return res.status(400).json({ message: 'Уже утверждено.' });
+
+    const changedBy = authUser.fullName || pin;
+    await recordTzHistory(tz.id, 'approved', false, true, changedBy);
+    tz.approved = true;
+    tz.approved_by = authUser.id;
+    tz.approved_at = new Date().toISOString();
+
+    // Move to review if still in draft
+    if (tz.status === 'draft') {
+      await recordTzHistory(tz.id, 'status', 'draft', 'review', changedBy);
+      tz.status = 'review';
+    }
+
+    tz.updated_at = new Date().toISOString();
+    await writeJson(FILES.tz, allTz);
+    return res.json({ message: 'Предложение утверждено.', tz: { ...tz, flags: computeTzFlags(tz) } });
+  });
+});
+
 app.get('/api/tz/:id', async (req, res) => {
   const reqPin = String(req.query.pin || '').trim();
-  if (!(await requireSuperAdmin(reqPin))) return res.status(403).json({ message: 'Нет доступа.' });
-
   const id = req.params.id;
   const allTz = await readJson(FILES.tz, []);
   const tz = allTz.find((t) => t.id === id);
   if (!tz) return res.status(404).json({ message: 'ТЗ не найдено.' });
 
+  const isUserType = TZ_USER_TYPES.includes(tz.type);
+  if (isUserType) {
+    const user = await getUserByPin(reqPin);
+    if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+    // Non-superadmin can only view their own items or items assigned to them
+    if (!isSuperAdmin(reqPin, user) && tz.created_by_id !== user.id && tz.assignee_id !== user.id) {
+      return res.status(403).json({ message: 'Нет доступа.' });
+    }
+  } else {
+    if (!(await requireSuperAdmin(reqPin))) return res.status(403).json({ message: 'Нет доступа.' });
+  }
+
   const history = (await readJson(FILES.tzHistory, []))
     .filter((h) => h.tz_id === id)
     .sort((a, b) => b.changed_at.localeCompare(a.changed_at));
 
-  return res.json({ ...tz, flags: computeTzFlags(tz), history });
+  // Resolve assignee name
+  const users = await readJson(FILES.users, []);
+  const assigneeName = tz.assignee_id ? (users.find(u => u.id === tz.assignee_id)?.fullName || null) : null;
+  const assignedByName = tz.assigned_by_id ? (users.find(u => u.id === tz.assigned_by_id)?.fullName || null) : null;
+  const approvedByName = tz.approved_by ? (users.find(u => u.id === tz.approved_by)?.fullName || null) : null;
+
+  return res.json({ ...tz, flags: computeTzFlags(tz), history, assignee_name: assigneeName, assigned_by_name: assignedByName, approved_by_name: approvedByName });
 });
 
 app.post('/api/admin/tz-stats', async (req, res) => {
@@ -1606,7 +1719,9 @@ app.post('/api/admin/tz-export', async (req, res) => {
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
-  const items = filterTz(allTz, req.body);
+  const users = await readJson(FILES.users, []);
+  const usersMap = new Map(users.map(u => [u.id, u.fullName]));
+  const items = filterTz(allTz, req.body, usersMap);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   const prioLabels = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
@@ -1664,6 +1779,87 @@ app.post('/api/admin/tz-export', async (req, res) => {
   res.send(Buffer.from(buffer));
 });
 
+/* ── TZ Excel import (AI-powered) ── */
+
+const xlsxImportUpload = multer({
+  storage: multer.memoryStorage(),
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    if (file.originalname.endsWith('.xlsx')) cb(null, true);
+    else cb(new Error('Допустимы только .xlsx файлы'));
+  }
+}).single('file');
+
+app.post('/api/admin/tz-import', (req, res) => {
+  xlsxImportUpload(req, res, async (uploadErr) => {
+    if (uploadErr) return res.status(400).json({ message: uploadErr.message });
+    try {
+      const pin = String(req.body.pin || '').trim();
+      const authUser = await requireSuperAdmin(pin);
+      if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+
+      if (!req.file) return res.status(400).json({ message: 'Файл не загружен.' });
+
+      const wb = new ExcelJS.Workbook();
+      await wb.xlsx.load(req.file.buffer);
+      const ws = wb.getWorksheet('ТЗ');
+      if (!ws) return res.status(400).json({ message: 'Лист «ТЗ» не найден в файле.' });
+
+      // Parse Excel rows into text for AI
+      const rows = [];
+      ws.eachRow((row, rowNum) => {
+        if (rowNum === 1) return;
+        const tzCode = String(row.getCell(1).value || '').trim();
+        if (!tzCode) return;
+        const status = String(row.getCell(6).value || '').trim();
+        const notes = String(row.getCell(9).value || '').trim().slice(0, 5000);
+        if (status || notes) rows.push({ tz_code: tzCode, status, completion_notes: notes });
+      });
+
+      if (!rows.length) return res.status(400).json({ message: 'Нет данных для импорта в файле.' });
+
+      // Build AI prompt
+      const statusMap = Object.entries(TZ_STATUS_LABELS).map(([k, v]) => `${v} → ${k}`).join(', ');
+      const prompt = `Ты — автоматический импортёр ТЗ. Тебе дан список строк из Excel-файла (поля: tz_code, status, completion_notes).
+
+Задача: прочитай файл data/tz.json, найди записи по tz_code и обнови поля status и completion_notes.
+
+Правила:
+1. Статусы в Excel написаны по-русски, иногда неточно. Маппинг: ${statusMap}. Если статус похож на одну из меток (сокращения, опечатки, синонимы) — используй соответствующий ключ. Если совсем непонятно — пропусти строку и упомяни в отчёте.
+2. completion_notes: обнови если не пустое и отличается от текущего.
+3. Обязательно проставь updated_at = new Date().toISOString() для изменённых записей.
+4. Сохрани обратно в data/tz.json.
+5. Выведи краткий отчёт: сколько обновлено, пропущено, какие ошибки были.
+
+Данные из Excel (JSON):
+${JSON.stringify(rows, null, 2)}`;
+
+      // Create AI task
+      const task = {
+        id: randomUUID(),
+        prompt: prompt.slice(0, 16000),
+        status: 'pending',
+        result: null,
+        created_by: authUser.fullName || 'superadmin',
+        created_at: new Date().toISOString(),
+        started_at: null,
+        finished_at: null
+      };
+
+      await withLock(FILES.aiTasks, async () => {
+        const tasks = await readJson(FILES.aiTasks, []);
+        tasks.push(task);
+        await writeJson(FILES.aiTasks, tasks);
+      });
+
+      return res.json({ taskId: task.id, message: `AI-задача создана. ${rows.length} строк отправлено на анализ.` });
+    } catch (err) {
+      console.error('TZ import error:', err);
+      return res.status(500).json({ message: 'Ошибка импорта: ' + err.message });
+    }
+  });
+});
+
 /* ── Kanban view (superadmin only) ── */
 
 app.post('/api/admin/tz-kanban', async (req, res) => {
@@ -1671,7 +1867,9 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
-  const items = filterTz(allTz, req.body);
+  const users = await readJson(FILES.users, []);
+  const usersMap = new Map(users.map(u => [u.id, u.fullName]));
+  const items = filterTz(allTz, req.body, usersMap);
 
   items.sort((a, b) => {
     const pa = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -1690,13 +1888,27 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
 
 app.patch('/api/tz/:id/status', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  const authUser = await requireSuperAdmin(pin);
-  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+  const id = req.params.id;
+
+  // Read TZ to check type
+  const allTzPre = await readJson(FILES.tz, []);
+  const tzPre = allTzPre.find(t => t.id === id);
+  const isUserType = tzPre && TZ_USER_TYPES.includes(tzPre.type);
+
+  let authUser;
+  if (isUserType) {
+    authUser = await getUserByPin(pin);
+    if (!authUser) return res.status(403).json({ message: 'Требуется авторизация.' });
+    if (!isSuperAdmin(pin, authUser) && tzPre.created_by_id !== authUser.id && tzPre.assignee_id !== authUser.id) {
+      return res.status(403).json({ message: 'Нет доступа.' });
+    }
+  } else {
+    authUser = await requireSuperAdmin(pin);
+    if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+  }
 
   const newStatus = String(req.body.status || '').trim();
   if (!TZ_STATUSES.includes(newStatus)) return res.status(400).json({ message: 'Неизвестный статус.' });
-
-  const id = req.params.id;
 
   return withLock(FILES.tz, async () => {
     const allTz = await readJson(FILES.tz, []);

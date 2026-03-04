@@ -1,1 +1,20 @@
-[]
+[
+  {
+    "id": "5f0e5305-7ae8-46ce-8614-b50ffc530832",
+    "pin": "1319",
+    "category": "ПО/установка",
+    "subcategory": "Ошибка/вылетает",
+    "location": "Офис 2 этаж",
+    "seat": "244",
+    "description": "-",
+    "fullName": "Гайфутдинов Тимур Ринатович",
+    "contact": "+79061211068",
+    "status": "new",
+    "statusUpdatedAt": null,
+    "takenBy": null,
+    "rating": null,
+    "ratingComment": null,
+    "forwardedToApi": false,
+    "createdAt": "2026-02-27T12:58:34.815Z"
+  }
+]

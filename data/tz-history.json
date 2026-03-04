@@ -1,1 +1,776 @@
-[]
+[
+  {
+    "id": "f5f0774e-387d-4a70-a080-f29d7c87004f",
+    "tz_id": "d99cd88c-8940-49fd-bddf-eb0f65468b8a",
+    "field": "description",
+    "old_value": "",
+    "new_value": "На данный момент интерес клиента может проходить через всю воронку продаж без разделения на ОХ и ТЭО. Однако сотрудники, отвечающие за продажи услуг склада, с помощью индивидуальных настроек скрывают этапы, не относящиеся к их работе. В результате карточка интереса клиента может вылететь из поля видимости сотрудника, что может привести к нарушению сроков обработки.",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:39:37.489Z"
+  },
+  {
+    "id": "ad7e7b3b-b869-4850-a28b-d8d1681cce85",
+    "tz_id": "d99cd88c-8940-49fd-bddf-eb0f65468b8a",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:40:05.870Z"
+  },
+  {
+    "id": "8d084d55-99f2-43ce-bb4c-cc53136ed7f1",
+    "tz_id": "d99cd88c-8940-49fd-bddf-eb0f65468b8a",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:40:17.829Z"
+  },
+  {
+    "id": "a123dc1e-5bcd-41b5-803f-6282330e04d1",
+    "tz_id": "f5da6d2f-7689-4232-adf1-d18bbb0b07a8",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:41:52.801Z"
+  },
+  {
+    "id": "76555d7f-6a81-4331-bde6-e7fa52a5f110",
+    "tz_id": "f5da6d2f-7689-4232-adf1-d18bbb0b07a8",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:41:56.870Z"
+  },
+  {
+    "id": "56e8e8b7-31b4-4eaa-b46e-bc95ad194b59",
+    "tz_id": "d1a77ad9-e100-4187-9e63-9e3aac18064f",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:42:47.583Z"
+  },
+  {
+    "id": "fd8f3724-d7bd-4ac9-8340-6982cdad6b47",
+    "tz_id": "d1a77ad9-e100-4187-9e63-9e3aac18064f",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:42:54.388Z"
+  },
+  {
+    "id": "e79f065d-5d53-4550-ac1f-30e6d102a8bb",
+    "tz_id": "6c494ce4-8f9b-4e03-9748-588cf5910f1d",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:43:53.655Z"
+  },
+  {
+    "id": "5a6a3e4a-7134-4525-942c-8f50d76fa332",
+    "tz_id": "6c494ce4-8f9b-4e03-9748-588cf5910f1d",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T06:43:58.343Z"
+  },
+  {
+    "id": "56be8784-aad8-47bd-8218-175329f99ad5",
+    "tz_id": "71f7ae89-503e-4a1d-bea6-a948c7851420",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T08:53:39.265Z"
+  },
+  {
+    "id": "25e3731a-f49b-4b49-a417-1e1a7223b6e6",
+    "tz_id": "71f7ae89-503e-4a1d-bea6-a948c7851420",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T08:53:45.125Z"
+  },
+  {
+    "id": "ba1d00e1-b9fc-46ce-a4e5-64dbd5ecdd38",
+    "tz_id": "71f7ae89-503e-4a1d-bea6-a948c7851420",
+    "field": "date_dev_deadline",
+    "old_value": null,
+    "new_value": "2026-03-02",
+    "changed_by": "Ахметзянов Альберт Анасович",
+    "changed_at": "2026-03-02T09:33:54.446Z"
+  },
+  {
+    "id": "62a0c830-7663-49ee-9994-f32ab4ee4dd9",
+    "tz_id": "71f7ae89-503e-4a1d-bea6-a948c7851420",
+    "field": "date_release_deadline",
+    "old_value": null,
+    "new_value": "2026-03-03",
+    "changed_by": "Ахметзянов Альберт Анасович",
+    "changed_at": "2026-03-02T09:33:54.447Z"
+  },
+  {
+    "id": "36b0b777-fb32-4693-810e-799906a0970e",
+    "tz_id": "a55d94ad-9ff1-4183-a69d-e39aad33aafe",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T10:46:24.274Z"
+  },
+  {
+    "id": "b9593055-1026-4d52-bc82-1e69879e98b3",
+    "tz_id": "a55d94ad-9ff1-4183-a69d-e39aad33aafe",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T10:46:29.093Z"
+  },
+  {
+    "id": "9c26a97c-6bdb-490d-9929-bc9400405d15",
+    "tz_id": "d1a77ad9-e100-4187-9e63-9e3aac18064f",
+    "field": "priority",
+    "old_value": "high",
+    "new_value": "medium",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:27:14.558Z"
+  },
+  {
+    "id": "de278039-34de-457d-9503-61d7d1ca0d38",
+    "tz_id": "d1a77ad9-e100-4187-9e63-9e3aac18064f",
+    "field": "link_jira",
+    "old_value": "",
+    "new_value": "https://jira.lkds.alabuga.ru/browse/LKDS-86",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:27:14.558Z"
+  },
+  {
+    "id": "b41d5b92-01f9-4646-9181-fee6f839993d",
+    "tz_id": "cc81e069-8e51-4768-a9de-99076a9c48a7",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:31:33.575Z"
+  },
+  {
+    "id": "300d1c59-20ad-4c64-9941-991ecf6f21d9",
+    "tz_id": "cc81e069-8e51-4768-a9de-99076a9c48a7",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:31:39.848Z"
+  },
+  {
+    "id": "b82a574a-f0d9-4f76-a5cf-86a9a40a391d",
+    "tz_id": "8597b398-0ae5-4565-95ed-44e3f72f21a9",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:39:14.440Z"
+  },
+  {
+    "id": "e5feebe1-3c4a-4f15-bb98-948ea9ed9a5c",
+    "tz_id": "8597b398-0ae5-4565-95ed-44e3f72f21a9",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:39:19.691Z"
+  },
+  {
+    "id": "dbac01ac-13eb-4034-a751-2a1a0fab6929",
+    "tz_id": "c2fc83c5-8390-4ccf-a6c2-0e3bbde3eff3",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:43:09.452Z"
+  },
+  {
+    "id": "865e6001-d8a7-4bfc-a096-cc92d25a92ad",
+    "tz_id": "c2fc83c5-8390-4ccf-a6c2-0e3bbde3eff3",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:43:14.063Z"
+  },
+  {
+    "id": "5c344e9a-b563-4013-952a-781aeb078a2b",
+    "tz_id": "1e93a519-4da6-442d-9a93-5122ab9d26d6",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:50:26.721Z"
+  },
+  {
+    "id": "94352408-4d1b-4ce4-81d3-4b0e43334bfb",
+    "tz_id": "1e93a519-4da6-442d-9a93-5122ab9d26d6",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T11:50:31.577Z"
+  },
+  {
+    "id": "caee4384-7629-4668-8d44-006ed6b07b82",
+    "tz_id": "a2f2bc19-d7c0-408d-95d2-55a777f1618d",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:04:24.022Z"
+  },
+  {
+    "id": "08bb3fcb-259f-4fea-9816-f6f30ef07565",
+    "tz_id": "a2f2bc19-d7c0-408d-95d2-55a777f1618d",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:04:29.663Z"
+  },
+  {
+    "id": "703ab167-4769-4dbf-9a52-12fa5a44c8c7",
+    "tz_id": "a2f2bc19-d7c0-408d-95d2-55a777f1618d",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:04:37.407Z"
+  },
+  {
+    "id": "7d7f3810-0b68-40fa-b7ce-ced392dc244a",
+    "tz_id": "a2f2bc19-d7c0-408d-95d2-55a777f1618d",
+    "field": "date_dev_deadline",
+    "old_value": null,
+    "new_value": "2026-01-02",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:05:08.916Z"
+  },
+  {
+    "id": "1b099ecb-106d-4375-a1e3-fc445f798e9b",
+    "tz_id": "5d568ade-670e-4596-a569-a43c27466a81",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:08:26.984Z"
+  },
+  {
+    "id": "b69ecae3-e986-4a80-87c8-b1b6c7b0970d",
+    "tz_id": "5d568ade-670e-4596-a569-a43c27466a81",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:08:33.068Z"
+  },
+  {
+    "id": "82b71b37-85bb-4344-94e1-ff4a619452de",
+    "tz_id": "5d568ade-670e-4596-a569-a43c27466a81",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:08:37.842Z"
+  },
+  {
+    "id": "25da50c5-9ac1-42ad-a617-0d4ee39a5f5a",
+    "tz_id": "3863f394-634c-4328-90aa-e06b122d4fb4",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:10:40.018Z"
+  },
+  {
+    "id": "590e0827-da9d-44f7-96b1-e8772b75276b",
+    "tz_id": "3863f394-634c-4328-90aa-e06b122d4fb4",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:10:45.105Z"
+  },
+  {
+    "id": "cc4d6603-8bda-4653-8d46-2ada0a1b398d",
+    "tz_id": "3863f394-634c-4328-90aa-e06b122d4fb4",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:10:50.151Z"
+  },
+  {
+    "id": "5c3384b7-f5fb-4dd4-94d7-cbf268ff508f",
+    "tz_id": "3863f394-634c-4328-90aa-e06b122d4fb4",
+    "field": "date_release_deadline",
+    "old_value": null,
+    "new_value": "2026-03-02",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:11:04.380Z"
+  },
+  {
+    "id": "8d843c65-bc6e-4459-a80d-5f117f838350",
+    "tz_id": "3863f394-634c-4328-90aa-e06b122d4fb4",
+    "field": "date_dev_deadline",
+    "old_value": null,
+    "new_value": "2026-04-03",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:11:18.645Z"
+  },
+  {
+    "id": "6fb23be6-43a4-44b9-aafc-6cc7307f8a02",
+    "tz_id": "3863f394-634c-4328-90aa-e06b122d4fb4",
+    "field": "date_dev_deadline",
+    "old_value": "2026-04-03",
+    "new_value": "2026-01-03",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-02T12:11:30.660Z"
+  },
+  {
+    "id": "8c7fa920-22cb-4c55-95c1-93cd94290514",
+    "tz_id": "260f489c-959b-4914-8cf9-3fa88ad0fbc1",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:36:42.866Z"
+  },
+  {
+    "id": "684ce8d4-f72c-46cd-8f83-7d9453f11b2a",
+    "tz_id": "260f489c-959b-4914-8cf9-3fa88ad0fbc1",
+    "field": "description",
+    "old_value": "",
+    "new_value": "Целью данного технического задания является оптимизация процессов взаимодействия с платформами и контейнерами в процессе их перемещения и выбытия. Внесение предложенных изменений позволит повысить удобство работы и увеличить количество регистрируемых операций в TOS, исправив ограничивающие условия.",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:36:42.868Z"
+  },
+  {
+    "id": "12f3033b-708c-447b-80cb-267c08e4b8c7",
+    "tz_id": "8ea6495f-e63b-47c7-a356-62fc701a1f71",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:41:33.645Z"
+  },
+  {
+    "id": "883550a9-5c85-4ef1-b5db-08ee6d1b3693",
+    "tz_id": "8ea6495f-e63b-47c7-a356-62fc701a1f71",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:41:54.486Z"
+  },
+  {
+    "id": "92fd86d0-5870-4bd4-8c54-cc32a8b979c6",
+    "tz_id": "8ea6495f-e63b-47c7-a356-62fc701a1f71",
+    "field": "status",
+    "old_value": "development",
+    "new_value": "testing",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:42:04.764Z"
+  },
+  {
+    "id": "d3ae1e0a-3c44-42dd-a2c2-7f4e1dd07908",
+    "tz_id": "8ea6495f-e63b-47c7-a356-62fc701a1f71",
+    "field": "status",
+    "old_value": "testing",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:42:12.845Z"
+  },
+  {
+    "id": "0d8c3c16-d231-4b2f-8071-6b18e4b427ff",
+    "tz_id": "8b7a7c61-22e4-47a7-aad8-58af9717e7eb",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:51:25.666Z"
+  },
+  {
+    "id": "f4332754-870c-49a1-b1be-03ea35d0a8e4",
+    "tz_id": "8ea6495f-e63b-47c7-a356-62fc701a1f71",
+    "field": "owner",
+    "old_value": "",
+    "new_value": "Ахметзянов Альберт Анасович",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:51:44.673Z"
+  },
+  {
+    "id": "64909a26-e765-4970-8313-2a7968d0231b",
+    "tz_id": "2f2ce56a-959e-4bfa-8220-3275b8c90e26",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T06:55:05.243Z"
+  },
+  {
+    "id": "ddd44e11-e78f-4114-81a0-11416b54084e",
+    "tz_id": "349f014f-4b31-413d-9f4b-cf1c42e076d0",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:03:45.055Z"
+  },
+  {
+    "id": "48a4c154-8dd9-461d-8b9a-b322a3074c5f",
+    "tz_id": "5bf645be-d797-48ef-aaa3-3029272cfa00",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:05:32.919Z"
+  },
+  {
+    "id": "f412774f-2df7-4279-8009-7d4217f9a1a9",
+    "tz_id": "d08d95a5-bafb-4a7b-8a03-c7ebcc9f7fef",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:11:03.906Z"
+  },
+  {
+    "id": "09c17dca-4e96-4f01-81c0-7c0e1bb10bfd",
+    "tz_id": "d08d95a5-bafb-4a7b-8a03-c7ebcc9f7fef",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:11:09.567Z"
+  },
+  {
+    "id": "2f3d4c51-801c-4a16-858a-175b54d8047e",
+    "tz_id": "d08d95a5-bafb-4a7b-8a03-c7ebcc9f7fef",
+    "field": "status",
+    "old_value": "development",
+    "new_value": "testing",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:11:15.357Z"
+  },
+  {
+    "id": "c821df0d-e4e8-4475-b0f1-b4aab7f8b662",
+    "tz_id": "d08d95a5-bafb-4a7b-8a03-c7ebcc9f7fef",
+    "field": "status",
+    "old_value": "testing",
+    "new_value": "release",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:11:21.522Z"
+  },
+  {
+    "id": "e37bb8e9-8e0c-43f6-9ca2-1fae09bc5c6c",
+    "tz_id": "d08d95a5-bafb-4a7b-8a03-c7ebcc9f7fef",
+    "field": "status",
+    "old_value": "release",
+    "new_value": "production",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:11:30.634Z"
+  },
+  {
+    "id": "05a401ad-4fdd-41b6-b7ca-a62bb26d3f4b",
+    "tz_id": "94a9b8d7-0fac-4ce4-b414-a275161eeccd",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:28:17.241Z"
+  },
+  {
+    "id": "33c88fd1-0a8d-413d-b8ab-f84508478439",
+    "tz_id": "e91135f7-9012-4484-993d-bce5223105f6",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:31:53.847Z"
+  },
+  {
+    "id": "c3e94836-0e7b-4f9b-8871-68c5779793f0",
+    "tz_id": "161c7fe3-46a3-4b22-aead-e9f555f8d226",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:36:08.160Z"
+  },
+  {
+    "id": "b5696afa-815a-49ad-80f8-743aae982211",
+    "tz_id": "ec0d797c-bb53-44f2-8044-fb9af6122607",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:39:04.377Z"
+  },
+  {
+    "id": "1ce7a8e3-cb63-4b34-9938-eb0ae907dd69",
+    "tz_id": "312aacaf-8ef7-43c4-b39c-82a424992a8e",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:42:37.077Z"
+  },
+  {
+    "id": "e274ca66-e916-4287-93b3-dfb17169b7e4",
+    "tz_id": "cc6e2582-c4a5-4fd9-b0e4-32607db46899",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T07:45:16.751Z"
+  },
+  {
+    "id": "84d9953a-283b-4a73-b010-3fe8bd68412e",
+    "tz_id": "a4b6de66-3124-433c-849f-56d322c4ef10",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T08:11:19.188Z"
+  },
+  {
+    "id": "09ccec86-1cd1-45ae-a8ad-59594d8a1879",
+    "tz_id": "50927392-63bf-4043-809a-c10628462163",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-03T08:13:37.298Z"
+  },
+  {
+    "id": "724b0da1-c309-4928-b8a6-00ef87054fcd",
+    "tz_id": "f4cf32db-350f-4451-a905-084cf4c2c51a",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:05:10.779Z"
+  },
+  {
+    "id": "1ab48018-5974-418f-9939-0408028b3875",
+    "tz_id": "f4cf32db-350f-4451-a905-084cf4c2c51a",
+    "field": "owner",
+    "old_value": "Балеев Владислав Васильевич",
+    "new_value": "Ахметзянов Альберт Анасович",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:05:10.781Z"
+  },
+  {
+    "id": "26e70aae-4348-4733-af1a-bdbe4e8e0a9b",
+    "tz_id": "cac97a20-61c5-4b96-a06f-8f44de240657",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:08:54.329Z"
+  },
+  {
+    "id": "764f2781-3401-4064-a51a-8159eb8609ae",
+    "tz_id": "e8ff9cb9-4e4e-48b0-ad02-a2d234794ca9",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:14:35.632Z"
+  },
+  {
+    "id": "488961f2-ba7d-4c7b-87f5-0f7f6e5d4d37",
+    "tz_id": "e8ff9cb9-4e4e-48b0-ad02-a2d234794ca9",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:14:42.311Z"
+  },
+  {
+    "id": "f0b0efce-9a61-4755-9212-7183fcff4e32",
+    "tz_id": "e8ff9cb9-4e4e-48b0-ad02-a2d234794ca9",
+    "field": "status",
+    "old_value": "development",
+    "new_value": "testing",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:14:46.499Z"
+  },
+  {
+    "id": "3c41aedf-c3ad-4fc3-b368-b1cd7a888ab4",
+    "tz_id": "e8ff9cb9-4e4e-48b0-ad02-a2d234794ca9",
+    "field": "status",
+    "old_value": "testing",
+    "new_value": "release",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:14:53.609Z"
+  },
+  {
+    "id": "f481867f-8565-45f6-a0eb-0d7929a71f45",
+    "tz_id": "e8ff9cb9-4e4e-48b0-ad02-a2d234794ca9",
+    "field": "status",
+    "old_value": "release",
+    "new_value": "production",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:14:58.332Z"
+  },
+  {
+    "id": "5bff79a0-4823-41d3-a9f7-8a79a62a5faf",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:08.208Z"
+  },
+  {
+    "id": "2154f2f5-df56-40af-9a28-8cb5794453e6",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:13.271Z"
+  },
+  {
+    "id": "6570f426-bcde-4606-9503-bacd2df97400",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "development",
+    "new_value": "testing",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:18.142Z"
+  },
+  {
+    "id": "4bbf7bf2-aca0-4763-b829-7257f4103216",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "testing",
+    "new_value": "release",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:24.439Z"
+  },
+  {
+    "id": "52492913-9745-4adb-8399-a52bfad54fa2",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "release",
+    "new_value": "cancelled",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:41.064Z"
+  },
+  {
+    "id": "6013035c-d9dd-48d3-8f7b-6c1ce78fa2e2",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "cancelled",
+    "new_value": "draft",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:47.488Z"
+  },
+  {
+    "id": "ddd8391d-df20-4cae-bcea-e596aaee88da",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "draft",
+    "new_value": "review",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:51.572Z"
+  },
+  {
+    "id": "a8ac9838-b704-4c15-bbd1-edc4a401771f",
+    "tz_id": "886bd839-ac6b-456c-ba47-e295c47c5c9d",
+    "field": "status",
+    "old_value": "review",
+    "new_value": "analysis",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T07:32:55.186Z"
+  },
+  {
+    "id": "3a2e05ff-4953-44d8-a53d-b9d3c26c0bf1",
+    "tz_id": "a9f89387-7aa4-4b23-9645-aeb97954d972",
+    "field": "status",
+    "old_value": "testing",
+    "new_value": "production",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T10:46:46.137Z"
+  },
+  {
+    "id": "fb8a8758-e53e-456c-ab90-aecb97902920",
+    "tz_id": "a9f89387-7aa4-4b23-9645-aeb97954d972",
+    "field": "completion_notes",
+    "old_value": "",
+    "new_value": "В ALIS реализован BE и FE, интеграции нет",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T10:46:46.139Z"
+  },
+  {
+    "id": "44ffa393-0232-4a71-acfd-d032e471bfa2",
+    "tz_id": "0baa3d23-eb95-4f93-8433-d6276f8e3df3",
+    "field": "completion_notes",
+    "old_value": "",
+    "new_value": "Реализовано на DEV настройка разделов и столбцов",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T10:54:54.918Z"
+  },
+  {
+    "id": "2a43195a-1ab1-4376-b77e-ef1e99c95319",
+    "tz_id": "b51e0f89-a0c8-4e66-8849-cd2c25efc8f9",
+    "field": "completion_notes",
+    "old_value": "",
+    "new_value": "Реализовано автоматическое заполнение полей при создании заявки и редизайн",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T11:03:02.263Z"
+  },
+  {
+    "id": "8a28a3fc-5f66-4a9d-9a8f-9142c5679d11",
+    "tz_id": "b51e0f89-a0c8-4e66-8849-cd2c25efc8f9",
+    "field": "status",
+    "old_value": "production",
+    "new_value": "partial",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T11:27:14.018Z"
+  },
+  {
+    "id": "b0042132-7278-49eb-853c-6db11acac0bc",
+    "tz_id": "090b9950-194e-4cf4-8342-f8ffa92f7518",
+    "field": "completion_notes",
+    "old_value": "",
+    "new_value": "Реализовано, но из-за ограниченных возможностей системы нельзя было реализовать полный функционал как описан в ТЗ.",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T11:45:11.907Z"
+  },
+  {
+    "id": "20c7ed18-506c-4628-ba64-ea834561385d",
+    "tz_id": "44389526-cae9-43aa-9fe6-37c0e3fb0747",
+    "field": "completion_notes",
+    "old_value": "",
+    "new_value": "ТЗ описано, но есть ряд вопросов которые необходимы для прояснения",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T12:16:39.546Z"
+  },
+  {
+    "id": "afb48ff0-1712-49a6-8be3-8a916ed54b5a",
+    "tz_id": "44389526-cae9-43aa-9fe6-37c0e3fb0747",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "development",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-04T12:16:57.928Z"
+  }
+]

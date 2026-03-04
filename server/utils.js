@@ -1,5 +1,10 @@
 // Shared TZ utilities — used by server/app.js and scripts/ai-worker.js
 
+export const TZ_TYPES = ['ТЗ', 'Дефект', 'Заявка', 'Задача', 'Недоработка', 'Предложение'];
+
+// Types that any authenticated user can create (not only superadmin)
+export const TZ_USER_TYPES = ['Задача', 'Недоработка', 'Предложение'];
+
 export const TZ_STATUSES = ['draft', 'review', 'analysis', 'development', 'testing', 'release', 'production', 'partial', 'cancelled'];
 
 export const TZ_STATUS_LABELS = {
@@ -39,7 +44,7 @@ export function computeTzFlags(tz) {
   flags.deadline_soon = !flags.overdue && !!activeDeadline && activeDeadline <= soon7 && activeDeadline >= today;
 
   flags.no_dates = !tz.date_analysis_deadline && !tz.date_dev_deadline && !tz.date_release_deadline;
-  flags.no_owner = !tz.owner || tz.owner.trim() === '';
+  flags.no_owner = (!tz.owner || tz.owner.trim() === '') && !tz.assignee_id;
 
   flags.missing_deadline =
     (ord === 3 && !!tz.date_analysis_deadline && !tz.date_dev_deadline) ||

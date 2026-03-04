@@ -236,6 +236,7 @@
           </div>
         </section>
 
+
         <!-- AI Agent -->
         <section class="panel" id="panelAi">
           <div class="card slide-up">
@@ -465,8 +466,18 @@
               <select id="tzPriority" name="priority" required></select>
             </label>
           </div>
-          <label>
-            Ответственный
+          <div class="tz-form-grid" id="tzAssigneeRow">
+            <label>
+              Исполнитель
+              <select id="tzAssignee" name="assignee_id"><option value="">— не назначен —</option></select>
+            </label>
+            <label>
+              Дедлайн
+              <input id="tzDeadline" name="deadline" type="date" />
+            </label>
+          </div>
+          <label id="tzOwnerRow">
+            Ответственный (текст)
             <input id="tzOwner" name="owner" placeholder="ФИО ответственного" />
           </label>
           <label class="full-width">
@@ -509,6 +520,7 @@
               <textarea id="tzCompletionNotes" name="completion_notes" rows="3" placeholder="Что не доделано, какие замечания..."></textarea>
             </label>
           </div>
+          <div id="tzApproveRow" class="tz-approve-row hidden"></div>
           <div id="tzMeta" class="tz-meta hidden"></div>
           <div id="tzHistorySection" class="tz-history-section hidden">
             <h4>История изменений</h4>
