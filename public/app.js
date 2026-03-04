@@ -2444,7 +2444,7 @@ async function renderKbArticle() {
     kbContent.innerHTML = `<article class="kb-article-reader">
       <h1 class="kb-article-title">${esc(article.title)}</h1>
       <div class="kb-article-meta">${esc(article.created_by)} &middot; ${fmtDate(article.updated_at)}</div>
-      <div class="kb-article-body">${typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen'] }) : esc(article.content)}</div>
+      <div class="kb-article-body">${typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen', 'class'] }) : esc(article.content)}</div>
     </article>`;
 
     if (isSuperadmin) {
@@ -2487,6 +2487,7 @@ function initQuill() {
         [{ header: [1, 2, 3, false] }],
         ['bold', 'italic', 'underline', 'strike'],
         [{ list: 'ordered' }, { list: 'bullet' }],
+        [{ align: [] }, { align: 'center' }, { align: 'right' }],
         ['blockquote', 'code-block'],
         ['link', 'image'],
         ['clean']
@@ -2519,6 +2520,29 @@ function initQuill() {
     });
   });
 
+  // Replace pasted/dropped base64 images with server-uploaded URLs
+  q.clipboard.addMatcher('IMG', (node, delta) => {
+    const src = node.getAttribute('src') || '';
+    if (src.startsWith('data:')) {
+      // Convert base64 to file and upload asynchronously
+      fetch(src).then(r => r.blob()).then(blob => {
+        const ext = blob.type.split('/')[1] || 'png';
+        const file = new File([blob], `pasted.${ext}`, { type: blob.type });
+        const fd = new FormData();
+        fd.append('image', file);
+        fd.append('pin', state.pin);
+        return fetch('/api/kb/upload-image', { method: 'POST', body: fd });
+      }).then(r => r.json()).then(data => {
+        if (!data.url) return;
+        // Find and replace the base64 img with server URL
+        const imgs = q.root.querySelectorAll(`img[src^="data:"]`);
+        for (const img of imgs) img.setAttribute('src', data.url);
+      }).catch(() => {});
+      // Let Quill insert the base64 temporarily (will be replaced above)
+    }
+    return delta;
+  });
+
   state.kbQuill = q;
   return q;
 }
@@ -2549,7 +2573,7 @@ async function openKbEditor(article) {
     const q = initQuill();
     if (q) {
       if (article && article.content) {
-        q.root.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content) : article.content;
+        q.root.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen', 'class'] }) : article.content;
       } else {
         q.root.innerHTML = '';
       }
@@ -2563,6 +2587,28 @@ kbEditorForm.addEventListener('submit', async (e) => {
   kbEditorSubmitBtn.disabled = true;
 
   const q = state.kbQuill;
+
+  // Upload any remaining base64 images before saving
+  if (q) {
+    const imgs = q.root.querySelectorAll('img[src^="data:"]');
+    for (const img of imgs) {
+      try {
+        msg(kbEditorMessage, `Загрузка изображений (${Array.from(imgs).indexOf(img) + 1}/${imgs.length})...`, 'info');
+        const resp = await fetch(img.src);
+        const blob = await resp.blob();
+        const ext = blob.type.split('/')[1] || 'png';
+        const file = new File([blob], `pasted.${ext}`, { type: blob.type });
+        const fd = new FormData();
+        fd.append('image', file);
+        fd.append('pin', state.pin);
+        const upRes = await fetch('/api/kb/upload-image', { method: 'POST', body: fd });
+        const upData = await upRes.json();
+        if (upRes.ok && upData.url) img.setAttribute('src', upData.url);
+      } catch (_) { /* keep base64 if upload fails */ }
+    }
+    if (imgs.length) msg(kbEditorMessage, '', '');
+  }
+
   const content = q ? q.root.innerHTML : '';
 
   const body = {

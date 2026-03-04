@@ -342,7 +342,7 @@ app.use((req, res, next) => {
 
 /* ── Helpers ── */
 
-app.use(express.json({ limit: '1mb' }));
+app.use(express.json({ limit: '20mb' }));
 app.use(express.static(publicDir, { etag: false, maxAge: 0 }));
 
 async function readJson(filePath, fallback) {
@@ -1882,7 +1882,7 @@ app.post('/api/kb/articles', async (req, res) => {
     const article = {
       id: randomUUID(),
       title,
-      content: clip(content, 200000),
+      content: clip(content, 2000000),
       category_id: categoryId || null,
       pinned,
       created_by: authUser.fullName || 'superadmin',

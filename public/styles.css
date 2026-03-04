@@ -1253,6 +1253,9 @@ button{
 }
 .kb-article-body pre code{background:transparent;padding:0}
 .kb-article-body a{color:var(--accent)}
+.kb-article-body .ql-align-center{text-align:center}
+.kb-article-body .ql-align-right{text-align:right}
+.kb-article-body .ql-align-justify{text-align:justify}
 
 /* KB Editor popup */
 .kb-editor-popup-card{max-width:900px !important;width:95vw}
