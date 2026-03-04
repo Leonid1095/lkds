@@ -2809,72 +2809,91 @@ function initKanbanDnD() {
   let dragTzId = null;
   let dragFromStatus = null;
 
-  const cards = tzListContainer.querySelectorAll('.kanban-card');
-  const cols = tzListContainer.querySelectorAll('.kanban-column');
+  // Use event delegation on the board container for reliable DnD
+  const board = tzListContainer.querySelector('.kanban-board');
+  if (!board) return;
 
-  cards.forEach((card) => {
-    card.addEventListener('dragstart', (e) => {
-      dragTzId = card.dataset.tzId;
-      dragFromStatus = card.dataset.status;
-      card.classList.add('dragging');
-      e.dataTransfer.effectAllowed = 'move';
-    });
-    card.addEventListener('dragend', () => {
-      card.classList.remove('dragging');
-      cols.forEach((c) => { c.classList.remove('drag-over'); c.classList.remove('drag-forbidden'); });
-      dragTzId = null;
-      dragFromStatus = null;
-    });
+  function getColumn(el) {
+    return el.closest('.kanban-column');
+  }
+
+  board.addEventListener('dragstart', (e) => {
+    const card = e.target.closest('.kanban-card');
+    if (!card) return;
+    dragTzId = card.dataset.tzId;
+    dragFromStatus = card.dataset.status;
+    card.classList.add('dragging');
+    e.dataTransfer.effectAllowed = 'move';
+    e.dataTransfer.setData('text/plain', dragTzId);
   });
 
-  cols.forEach((col) => {
-    col.addEventListener('dragover', (e) => {
-      e.preventDefault();
-      if (!dragFromStatus) return;
-      const targetStatus = col.dataset.status;
-      if (targetStatus === dragFromStatus) return;
-      const allowed = JSON.parse(col.dataset.allowed || '[]');
-      // Check if transition FROM dragFromStatus TO targetStatus is allowed
-      const fromCol = tzListContainer.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
-      const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
-      if (fromAllowed.includes(targetStatus)) {
-        col.classList.add('drag-over');
-        col.classList.remove('drag-forbidden');
-        e.dataTransfer.dropEffect = 'move';
-      } else {
-        col.classList.add('drag-forbidden');
-        col.classList.remove('drag-over');
-        e.dataTransfer.dropEffect = 'none';
-      }
+  board.addEventListener('dragend', (e) => {
+    const card = e.target.closest('.kanban-card');
+    if (card) card.classList.remove('dragging');
+    board.querySelectorAll('.kanban-column').forEach((c) => {
+      c.classList.remove('drag-over');
+      c.classList.remove('drag-forbidden');
     });
-    col.addEventListener('dragleave', () => {
+    dragTzId = null;
+    dragFromStatus = null;
+  });
+
+  board.addEventListener('dragover', (e) => {
+    e.preventDefault();
+    if (!dragFromStatus) return;
+    const col = getColumn(e.target);
+    if (!col) return;
+    const targetStatus = col.dataset.status;
+    if (targetStatus === dragFromStatus) { e.dataTransfer.dropEffect = 'none'; return; }
+
+    const fromCol = board.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
+    const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
+    if (fromAllowed.includes(targetStatus)) {
+      col.classList.add('drag-over');
+      col.classList.remove('drag-forbidden');
+      e.dataTransfer.dropEffect = 'move';
+    } else {
+      col.classList.add('drag-forbidden');
+      col.classList.remove('drag-over');
+      e.dataTransfer.dropEffect = 'none';
+    }
+  });
+
+  board.addEventListener('dragleave', (e) => {
+    const col = getColumn(e.target);
+    if (!col) return;
+    // Only clear if actually leaving the column (not entering a child)
+    if (!col.contains(e.relatedTarget)) {
       col.classList.remove('drag-over');
       col.classList.remove('drag-forbidden');
-    });
-    col.addEventListener('drop', async (e) => {
-      e.preventDefault();
-      col.classList.remove('drag-over');
-      col.classList.remove('drag-forbidden');
-      if (!dragTzId || !dragFromStatus) return;
-      const targetStatus = col.dataset.status;
-      if (targetStatus === dragFromStatus) return;
+    }
+  });
 
-      const fromCol = tzListContainer.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
-      const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
-      if (!fromAllowed.includes(targetStatus)) return;
+  board.addEventListener('drop', async (e) => {
+    e.preventDefault();
+    const col = getColumn(e.target);
+    if (!col) return;
+    col.classList.remove('drag-over');
+    col.classList.remove('drag-forbidden');
+    if (!dragTzId || !dragFromStatus) return;
+    const targetStatus = col.dataset.status;
+    if (targetStatus === dragFromStatus) return;
 
-      try {
-        await api(`/api/tz/${dragTzId}/status`, {
-          method: 'PATCH',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, status: targetStatus })
-        });
-        showToast('Статус изменён', 'ok');
-        loadTzData();
-      } catch (err) {
-        showToast(err.message, 'danger');
-      }
-    });
+    const fromCol = board.querySelector(`.kanban-column[data-status="${dragFromStatus}"]`);
+    const fromAllowed = JSON.parse(fromCol?.dataset.allowed || '[]');
+    if (!fromAllowed.includes(targetStatus)) return;
+
+    try {
+      await api(`/api/tz/${dragTzId}/status`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ pin: state.pin, status: targetStatus })
+      });
+      showToast('Статус изменён', 'ok');
+      loadTzData();
+    } catch (err) {
+      showToast(err.message, 'danger');
+    }
   });
 }
 
