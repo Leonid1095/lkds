@@ -388,9 +388,9 @@ function showMain() {
   userGreeting.textContent = state.user.fullName;
   topbarAvatar.src = avatarUrl(state.avatar);
   topbarAvatar.alt = state.user.fullName;
-  if (state.isAdmin) {
+  if (state.adminRole === 'superadmin') {
     show(adminBtn);
-    if (state.adminRole === 'superadmin') updatePinBadge();
+    updatePinBadge();
   } else {
     hide(adminBtn);
   }
@@ -431,6 +431,7 @@ loginForm.addEventListener('submit', async (e) => {
     showMain();
     await loadApp();
     showTzNotifications();
+    showOnboarding();
     await restoreFromHash();
   } catch (err) {
     msg(loginMessage, err.message, 'error');
@@ -455,7 +456,7 @@ registerForm.addEventListener('submit', async (e) => {
     localStorage.setItem('lkds_pin', regPin);
     msg(registerMessage, 'Регистрация прошла успешно!', 'success');
     registerForm.reset();
-    setTimeout(async () => { showMain(); await loadApp(); await restoreFromHash(); }, 1500);
+    setTimeout(async () => { showMain(); await loadApp(); showOnboarding(); await restoreFromHash(); }, 1500);
   } catch (err) {
     msg(registerMessage, err.message, 'error');
   }
@@ -4098,6 +4099,55 @@ aiSendBtn.addEventListener('click', submitAiTask);
 aiPromptInput.addEventListener('keydown', (e) => {
   if (e.key === 'Enter' && !e.shiftKey) { e.preventDefault(); submitAiTask(); }
 });
+
+/* ── Onboarding (first-time user guide) ── */
+
+function showOnboarding() {
+  const key = `lkds_onboarding_${state.userId}`;
+  if (localStorage.getItem(key)) return;
+
+  const items = [
+    { icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="18" rx="2" ry="2"/><line x1="16" y1="2" x2="16" y2="6"/><line x1="8" y1="2" x2="8" y2="6"/><line x1="3" y1="10" x2="21" y2="10"/></svg>', title: 'Переговорки', desc: 'Бронирование переговорных комнат на нужное время' },
+    { icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="10"/><line x1="12" y1="8" x2="12" y2="12"/><line x1="12" y1="16" x2="12.01" y2="16"/></svg>', title: 'Заявка 1С CRM', desc: 'Подача заявок на ошибки и улучшения в 1С CRM' },
+    { icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/></svg>', title: 'База знаний', desc: 'Документация, инструкции и полезные материалы' },
+    { icon: '<svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"/><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"/></svg>', title: 'Ссылки', desc: 'Быстрый доступ к рабочим системам и ресурсам' }
+  ];
+
+  const overlay = document.createElement('div');
+  overlay.className = 'onboarding-overlay';
+  overlay.innerHTML = `
+    <div class="onboarding-card">
+      <button class="onboarding-close" title="Закрыть">&times;</button>
+      <h2 class="onboarding-title">Добро пожаловать в LKDS!</h2>
+      <p class="onboarding-subtitle">Вот что вам доступно на портале:</p>
+      <div class="onboarding-items">
+        ${items.map(i => `
+          <div class="onboarding-item">
+            <div class="onboarding-item-icon">${i.icon}</div>
+            <div>
+              <div class="onboarding-item-title">${i.title}</div>
+              <div class="onboarding-item-desc">${i.desc}</div>
+            </div>
+          </div>
+        `).join('')}
+      </div>
+      <button class="onboarding-ok">Понятно, начать работу</button>
+    </div>
+  `;
+
+  document.body.appendChild(overlay);
+  requestAnimationFrame(() => overlay.classList.add('onboarding-visible'));
+
+  const dismiss = () => {
+    localStorage.setItem(key, '1');
+    overlay.classList.remove('onboarding-visible');
+    overlay.addEventListener('transitionend', () => overlay.remove());
+  };
+
+  overlay.querySelector('.onboarding-close').addEventListener('click', dismiss);
+  overlay.querySelector('.onboarding-ok').addEventListener('click', dismiss);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
+}
 
 /* ── Init ── */
 

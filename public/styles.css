@@ -1559,3 +1559,49 @@ button{
   .slot-status.free.clickable::after{opacity:1}
   .link-btn{min-height:56px}
 }
+
+/* ── Onboarding ── */
+.onboarding-overlay {
+  position: fixed; inset: 0; z-index: 10000;
+  background: rgba(0,0,0,0.5); display: flex;
+  align-items: center; justify-content: center;
+  opacity: 0; transition: opacity .3s ease;
+}
+.onboarding-overlay.onboarding-visible { opacity: 1; }
+.onboarding-card {
+  background: #fff; border-radius: 16px; padding: 32px;
+  max-width: 460px; width: 90%; position: relative;
+  box-shadow: 0 20px 60px rgba(0,0,0,.2);
+  transform: translateY(20px); transition: transform .3s ease;
+}
+.onboarding-visible .onboarding-card { transform: translateY(0); }
+.onboarding-close {
+  position: absolute; top: 12px; right: 16px;
+  background: none; border: none; font-size: 24px;
+  cursor: pointer; color: #a0aec0; line-height: 1;
+}
+.onboarding-close:hover { color: #4a5568; }
+.onboarding-title {
+  font-size: 22px; font-weight: 700; color: #1a202c; margin: 0 0 4px;
+}
+.onboarding-subtitle {
+  font-size: 14px; color: #718096; margin: 0 0 20px;
+}
+.onboarding-items { display: flex; flex-direction: column; gap: 12px; margin-bottom: 24px; }
+.onboarding-item {
+  display: flex; align-items: flex-start; gap: 12px;
+  padding: 10px 12px; border-radius: 10px; background: #f7fafc;
+}
+.onboarding-item-icon {
+  flex-shrink: 0; width: 36px; height: 36px;
+  display: flex; align-items: center; justify-content: center;
+  background: #ebf4ff; border-radius: 8px; color: #3182ce;
+}
+.onboarding-item-title { font-weight: 600; font-size: 14px; color: #2d3748; }
+.onboarding-item-desc { font-size: 13px; color: #718096; margin-top: 2px; }
+.onboarding-ok {
+  width: 100%; padding: 12px; border: none; border-radius: 10px;
+  background: #3182ce; color: #fff; font-size: 15px; font-weight: 600;
+  cursor: pointer; transition: background .2s;
+}
+.onboarding-ok:hover { background: #2b6cb0; }

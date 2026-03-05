@@ -690,6 +690,7 @@ app.post('/api/profile/update', async (req, res) => {
     if (workDesk !== undefined) u.workDesk = workDesk;
 
     await writeJson(FILES.users, users);
+    invalidatePinCache(pin);
     return res.json({
       message: 'Профиль обновлён.', contact: u.contact,
       position: u.position || '',
@@ -1259,6 +1260,7 @@ app.post('/api/admin/toggle-admin', async (req, res) => {
 
   target.isAdmin = !target.isAdmin;
   await writeJson(FILES.users, users);
+  invalidatePinCacheByUserId(targetId);
   return res.json({ id: targetId, isAdmin: !!target.isAdmin });
 });
 
@@ -1285,6 +1287,7 @@ app.post('/api/admin/set-role', async (req, res) => {
   }
 
   await writeJson(FILES.users, users);
+  invalidatePinCacheByUserId(targetId);
   return res.json({ id: targetId, role });
 });
 

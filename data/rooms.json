@@ -1,7 +1,7 @@
 [
   {
     "id": "meeting-room-1",
-    "name": "Переговорка",
+    "name": "Квадратный стол 1",
     "capacity": 8,
     "location": "Офис"
   },
@@ -13,7 +13,7 @@
   },
   {
     "id": "meeting-room-2",
-    "name": "Переговорка 2",
+    "name": "Квадратный стол 2",
     "capacity": 8,
     "location": "Офис"
   }
