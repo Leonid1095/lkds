@@ -330,15 +330,13 @@
 22. ~~**Rate limiting пробелы.**~~ ✅
     Исправлено: userActionLimiter на /api/profile, /api/search, /api/kb, /api/team.
 
-23. **Avatar upload: auth после загрузки.**
-    Файл загружается до проверки авторизации, temp-файл не чистится при ошибке.
-    → Проверять PIN до вызова multer (через header).
+23. ~~**Avatar upload: auth после загрузки.**~~ ✅
+    Исправлено: auth через X-Auth-Pin header до multer.
 
 ### 🟡 Утечки памяти (фронтенд)
 
-24. **Event listeners копятся при re-render.**
-    `renderTzList()`, `renderTzComments()`, `renderMyItTickets()` — при каждом рендере вешают новые обработчики.
-    → Перейти на event delegation (1 listener на контейнер, проверка `e.target`).
+24. ~~**Event listeners копятся при re-render.**~~ ✅
+    Исправлено: event delegation для TZ list rows и comment delete buttons.
 
 25. ~~**`renderTzComments()` перезаписывает `onclick` глобальной кнопки.**~~ ✅
     Исправлено: один глобальный handler через `data-tzId`.
@@ -372,11 +370,11 @@
 
 ### 🟡 CSS / HTML / Доступность
 
-34. **Нет ARIA-атрибутов.**
-    → Добавить ARIA на интерактивные элементы, попапы, навигацию.
+34. ~~**Нет ARIA-атрибутов.**~~ ✅
+    Исправлено: role=dialog, role=tab, aria-label, aria-selected, alt text.
 
-35. **Нет тёмной темы.**
-    → Добавить CSS-переменные для dark mode.
+35. ~~**Нет тёмной темы.**~~ ✅
+    Исправлено: prefers-color-scheme dark mode.
 
 36. ~~**Дубль `.btn-danger-outline`.**~~ ✅
     Исправлено: второй переименован в `.btn-danger-outline-sm`.
@@ -407,6 +405,5 @@
 43. ~~**Hardcoded путь к Claude CLI.**~~ ✅
     Исправлено: `process.env.CLAUDE_BIN` с fallback.
 
-44. **Worker polling каждые 5 сек.**
-    Расход CPU/IO даже без задач.
-    → Увеличить до 30 сек или перейти на event-driven (файловый watch / HTTP trigger).
+44. ~~**Worker polling каждые 5 сек.**~~ ✅
+    Исправлено: 30 сек по умолчанию, настраивается через `WORKER_POLL_MS`.
