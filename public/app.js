@@ -375,7 +375,7 @@ async function restoreFromHash() {
       state.kbCategories = cats;
       const cat = cats.find((c) => toSlug(c.name) === h.kbCatSlug);
       if (cat && h.kbArticleSlug) {
-        const articles = await api(`/api/kb/articles?pin=${encodeURIComponent(state.pin)}&category_id=${encodeURIComponent(cat.id)}`);
+        const articles = await api(`/api/kb/articles?category_id=${encodeURIComponent(cat.id)}`);
         const art = articles.find((a) => toSlug(a.title) === h.kbArticleSlug);
         if (art) {
           state.kbView = 'article';
@@ -3631,7 +3631,7 @@ function kbPlural(n, one, few, many) {
 async function kbSearch(query) {
   if (!query.trim()) { renderKbCategories(); return; }
   try {
-    const articles = await api(`/api/kb/articles?pin=${encodeURIComponent(state.pin)}&search=${encodeURIComponent(query)}`);
+    const articles = await api(`/api/kb/articles?search=${encodeURIComponent(query)}`);
     renderKbArticleList(articles, `Результаты поиска: "${esc(query)}"`, true);
   } catch (err) {
     msg(kbMessage, err.message, 'error');
@@ -3666,7 +3666,7 @@ async function renderKbArticles() {
   }
 
   try {
-    const articles = await api(`/api/kb/articles?pin=${encodeURIComponent(state.pin)}&category_id=${encodeURIComponent(state.kbCategoryId || '')}`);
+    const articles = await api(`/api/kb/articles?category_id=${encodeURIComponent(state.kbCategoryId || '')}`);
     renderKbArticleList(articles, null, false);
   } catch (err) {
     msg(kbMessage, err.message, 'error');
@@ -4112,7 +4112,7 @@ function initGlobalSearch() {
 
 async function performGlobalSearch(q) {
   try {
-    const results = await api(`/api/search?pin=${encodeURIComponent(state.pin)}&q=${encodeURIComponent(q)}`);
+    const results = await api(`/api/search?q=${encodeURIComponent(q)}`);
     let html = '';
     if (results.tz.length) {
       html += '<div class="gs-section"><div class="gs-section-title">ТЗ</div>';
