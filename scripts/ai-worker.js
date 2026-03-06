@@ -2,13 +2,14 @@ import fs from 'node:fs/promises';
 import { spawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { computeTzFlags, TZ_STATUS_LABELS } from '../server/utils.js';
+import { computeTzFlags, TZ_STATUS_LABELS, buildStatusOrd } from '../server/utils.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const rootDir = path.resolve(__dirname, '..');
 const TASKS_FILE = path.join(rootDir, 'data', 'ai-tasks.json');
 const TZ_FILE = path.join(rootDir, 'data', 'tz.json');
+const BOARDS_FILE = path.join(rootDir, 'data', 'boards.json');
 const CLAUDE_BIN = '/home/plg/.nvm/versions/node/v20.19.4/bin/claude';
 const POLL_INTERVAL = 5000;
 const TASK_TIMEOUT = 300000;
@@ -51,14 +52,26 @@ async function sendTzDigest() {
   const adminIds = (process.env.TG_ADMIN_IDS || '').split(',').map((s) => s.trim()).filter(Boolean);
   if (!adminIds.length) return;
 
-  let allTz;
+  let allTz, boards;
   try {
     allTz = JSON.parse(await fs.readFile(TZ_FILE, 'utf8'));
+    boards = JSON.parse(await fs.readFile(BOARDS_FILE, 'utf8'));
   } catch {
     return;
   }
 
-  const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+  // Build board ord cache for dynamic flags
+  const ordCache = new Map();
+  const getOrd = (boardId) => {
+    if (!boardId) return undefined;
+    if (ordCache.has(boardId)) return ordCache.get(boardId);
+    const board = boards.find(b => b.id === boardId);
+    const ord = board ? buildStatusOrd(board.columns) : undefined;
+    ordCache.set(boardId, ord);
+    return ord;
+  };
+
+  const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz, getOrd(tz.board_id)) }));
   const active = withFlags.filter((t) => !['cancelled', 'production', 'partial'].includes(t.status));
 
   const overdue = active.filter((t) => t.flags.overdue);
@@ -96,7 +109,9 @@ async function sendTzDigest() {
   if (missing.length) {
     text += `\n🟣 <b>Неполный дедлайн: ${missing.length}</b>\n`;
     for (const t of missing.slice(0, 3)) {
-      const phase = TZ_STATUS_LABELS[t.status] || t.status;
+      const board = boards.find(b => b.id === t.board_id);
+      const boardLabels = board ? Object.fromEntries(board.columns.map(c => [c.id, c.name])) : TZ_STATUS_LABELS;
+      const phase = boardLabels[t.status] || t.status;
       text += `  • <code>${escHtml(t.tz_code)}</code> «${escHtml(t.title)}» — в ${phase.toLowerCase()}, нет дедлайна\n`;
     }
   }

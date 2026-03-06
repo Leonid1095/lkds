@@ -141,7 +141,6 @@ const kbCategoriesCloseBtn = $('kbCategoriesCloseBtn');
 const kbCategoriesMessage = $('kbCategoriesMessage');
 
 /* ── Metrics DOM ── */
-const tabMetrics = $('tabMetrics');
 const metricsContent = $('metricsContent');
 const metricsMessage = $('metricsMessage');
 
@@ -397,7 +396,10 @@ function showMain() {
   tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabKb.style.display = state.pin ? '' : 'none';
-  tabMetrics.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+  if (metricsContent) {
+    const tabMetrics = $('tabMetrics');
+    if (tabMetrics) tabMetrics.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+  }
   updateTzBadge();
 }
 
@@ -2555,36 +2557,61 @@ function renderTzLinkedTasks(tzId, data) {
     tzCommentsSection.parentNode.insertBefore(section, tzCommentsSection);
   }
   const links = data.linked_tz_ids || [];
+  const resolved = data.linked_tz_resolved || [];
   const isSA = state.adminRole === 'superadmin';
   let html = '<h4>Связанные задачи</h4>';
-  if (links.length) {
+  if (resolved.length) {
     html += '<div class="tz-links-list">';
-    for (const lid of links) {
-      const linked = state.tzList.find((t) => t.id === lid);
-      const label = linked ? `${linked.tz_code} — ${linked.title.slice(0, 40)}` : lid.slice(0, 8) + '...';
-      html += `<span class="tz-link-chip"><span class="tz-link-chip-text" data-tz-id="${esc(lid)}">${esc(label)}</span>${isSA ? `<button class="tz-link-remove" data-lid="${esc(lid)}">&times;</button>` : ''}</span>`;
+    for (const r of resolved) {
+      const label = `${r.tz_code} — ${r.title.slice(0, 40)}`;
+      html += `<span class="tz-link-chip"><span class="tz-link-chip-text" data-tz-id="${esc(r.id)}">${esc(label)}</span>${isSA ? `<button class="tz-link-remove" data-lid="${esc(r.id)}">&times;</button>` : ''}</span>`;
     }
     html += '</div>';
   } else {
     html += '<p class="tz-links-empty">Нет связей</p>';
   }
   if (isSA) {
-    const tzOpts = state.tzList.filter((t) => t.id !== tzId && !links.includes(t.id)).slice(0, 50);
-    html += `<select id="tzLinkAddSelect" class="tz-link-add-select"><option value="">+ Добавить связь...</option>${tzOpts.map((t) => `<option value="${esc(t.id)}">${esc(t.tz_code)} — ${esc(t.title.slice(0, 40))}</option>`).join('')}</select>`;
+    html += `<div class="tz-link-add-row">
+      <input type="text" id="tzLinkSearchInput" class="tz-link-add-select" placeholder="Поиск задачи для связи..." autocomplete="off" />
+      <div id="tzLinkSearchResults" class="tz-link-search-results" style="display:none"></div>
+    </div>`;
   }
   section.innerHTML = html;
   show(section);
 
-  // Bind add
-  const addSel = document.getElementById('tzLinkAddSelect');
-  if (addSel) addSel.addEventListener('change', async () => {
-    if (!addSel.value) return;
-    const newLinks = [...links, addSel.value];
-    try {
-      await api(`/api/tz/${tzId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: state.pin, linked_tz_ids: newLinks }) });
-      openTzDetail(tzId);
-    } catch (err) { showToast(err.message, 'danger'); }
-  });
+  // Bind search-as-you-type for adding links
+  const searchInput = document.getElementById('tzLinkSearchInput');
+  const searchResults = document.getElementById('tzLinkSearchResults');
+  let _linkSearchTimer = null;
+  if (searchInput) {
+    searchInput.addEventListener('input', () => {
+      clearTimeout(_linkSearchTimer);
+      const q = searchInput.value.trim();
+      if (q.length < 2) { searchResults.style.display = 'none'; return; }
+      _linkSearchTimer = setTimeout(async () => {
+        try {
+          const res = await api(`/api/search?q=${encodeURIComponent(q)}&pin=${encodeURIComponent(state.pin)}`);
+          const tzResults = (res.tz || []).filter((t) => t.id !== tzId && !links.includes(t.id)).slice(0, 10);
+          if (!tzResults.length) { searchResults.innerHTML = '<div class="tz-link-search-empty">Ничего не найдено</div>'; searchResults.style.display = 'block'; return; }
+          searchResults.innerHTML = tzResults.map((t) =>
+            `<div class="tz-link-search-item" data-id="${esc(t.id)}">${esc(t.tz_code)} — ${esc((t.title || '').slice(0, 50))}</div>`
+          ).join('');
+          searchResults.style.display = 'block';
+          searchResults.querySelectorAll('.tz-link-search-item').forEach((el) => {
+            el.addEventListener('click', async () => {
+              const newLinks = [...links, el.dataset.id];
+              try {
+                await api(`/api/tz/${tzId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: state.pin, linked_tz_ids: newLinks }) });
+                openTzDetail(tzId);
+              } catch (err) { showToast(err.message, 'danger'); }
+            });
+          });
+        } catch { searchResults.style.display = 'none'; }
+      }, 300);
+    });
+    searchInput.addEventListener('blur', () => { setTimeout(() => { searchResults.style.display = 'none'; }, 200); });
+  }
+
   // Bind remove
   section.querySelectorAll('.tz-link-remove').forEach((btn) => {
     btn.addEventListener('click', async (e) => {
@@ -2745,64 +2772,82 @@ async function loadItStatus(ticketId) {
 
 // Fallback colors for legacy statuses
 const KANBAN_STATUS_COLORS_FALLBACK = {
-  draft: '#edf2f7', review: '#fefcbf', analysis: '#bee3f8', development: '#c3dafe',
-  testing: '#e9d8fd', release: '#feebc8', production: '#c6f6d5', partial: '#fde68a', cancelled: '#fed7d7'
+  draft: '#edf2f7', review: '#fefcbf', waiting_analysis: '#fef3c7', analysis: '#bee3f8',
+  development: '#c3dafe', testing: '#e9d8fd', release: '#feebc8', production: '#c6f6d5',
+  partial: '#fde68a', cancelled: '#fed7d7'
 };
 
-function renderKanban(data) {
-  if (!tzListContainer) return;
-  const { columns, transitions, statusLabels, boardColumns } = data;
-  // Store transitions for DnD handlers
-  state.kanbanTransitions = transitions || {};
+function kanbanCardHtml(tz, mini) {
+  const f = tz.flags || {};
+  let flagsHtml = '';
+  if (f.overdue) flagsHtml += '<span class="kanban-flag kanban-flag-overdue">Просрочено</span>';
+  else if (f.deadline_soon) flagsHtml += '<span class="kanban-flag kanban-flag-soon">Скоро дедлайн</span>';
 
-  // Use board column order if available, else fallback to keys of columns
+  // Nearest deadline
+  let deadlineHtml = '';
+  const dl = tz.deadline || tz.date_analysis_deadline || tz.date_dev_deadline || tz.date_release_deadline;
+  if (dl && !mini) {
+    const days = Math.ceil((new Date(dl) - new Date()) / 86400000);
+    const dlLabel = days < 0 ? `${Math.abs(days)}д назад` : days === 0 ? 'сегодня' : `${days}д`;
+    const dlClass = days < 0 ? 'kanban-dl-overdue' : days <= 7 ? 'kanban-dl-soon' : 'kanban-dl-ok';
+    deadlineHtml = `<span class="kanban-deadline ${dlClass}">${esc(dlLabel)}</span>`;
+  }
+
+  const ownerHtml = tz.assignee_name ? `<div class="kanban-card-owner">${esc(tz.assignee_name)}</div>` : (tz.owner ? `<div class="kanban-card-owner">${esc(tz.owner)}</div>` : '');
+  const notesHtml = tz.completion_notes && !mini ? '<span class="kanban-flag kanban-flag-notes" title="Есть примечания">📝</span>' : '';
+
+  return `<div class="kanban-card${mini ? ' kanban-card-mini' : ''}" draggable="true" data-tz-id="${esc(tz.id)}" data-status="${esc(tz.status)}">
+    <div class="kanban-card-prio kanban-prio-${esc(tz.priority)}"></div>
+    <div class="kanban-card-body">
+      <div class="kanban-card-code">${esc(tz.tz_code)}${deadlineHtml}</div>
+      <div class="kanban-card-title">${esc(tz.title)}</div>
+      ${mini ? '' : ownerHtml}
+      ${notesHtml}${flagsHtml}
+    </div>
+  </div>`;
+}
+
+function kanbanResolveDisplay(data) {
+  const { boardColumns, columns } = data;
   const displayOrder = boardColumns
     ? boardColumns.filter(c => !c.hidden).sort((a, b) => a.order - b.order).map(c => c.id)
     : Object.keys(columns);
   const colorMap = boardColumns
     ? Object.fromEntries(boardColumns.map(c => [c.id, c.color]))
     : KANBAN_STATUS_COLORS_FALLBACK;
+  return { displayOrder, colorMap };
+}
+
+function renderKanban(data) {
+  if (!tzListContainer) return;
+  const { columns, transitions, statusLabels } = data;
+  state.kanbanTransitions = transitions || {};
+  const { displayOrder, colorMap } = kanbanResolveDisplay(data);
 
   let html = '<div class="kanban-board">';
   for (const status of displayOrder) {
     const cards = columns[status] || [];
     const color = colorMap[status] || '#edf2f7';
-    const allowed = transitions[status] || [];
 
-    html += `<div class="kanban-column" data-status="${esc(status)}">
+    const bcol = (data.boardColumns || []).find(c => c.id === status);
+    const wipLimit = bcol ? bcol.wip_limit || 0 : 0;
+    const wipOver = wipLimit > 0 && cards.length > wipLimit;
+
+    html += `<div class="kanban-column${wipOver ? ' kanban-wip-over' : ''}" data-status="${esc(status)}">
       <div class="kanban-column-header" style="background:${color}">
         <span class="kanban-col-title">${esc(statusLabels[status] || status)}</span>
-        <span class="kanban-col-count">${cards.length}</span>
+        <span class="kanban-col-count">${cards.length}${wipLimit ? `/${wipLimit}` : ''}</span>
       </div>
       <div class="kanban-cards">`;
 
-    for (const tz of cards) {
-      const f = tz.flags || {};
-      let flagsHtml = '';
-      if (f.overdue) flagsHtml += '<span class="kanban-flag kanban-flag-overdue">Просрочено</span>';
-      else if (f.deadline_soon) flagsHtml += '<span class="kanban-flag kanban-flag-soon">Скоро дедлайн</span>';
-
-      html += `<div class="kanban-card" draggable="true" data-tz-id="${esc(tz.id)}" data-status="${esc(tz.status)}">
-        <div class="kanban-card-prio kanban-prio-${esc(tz.priority)}"></div>
-        <div class="kanban-card-body">
-          <div class="kanban-card-code">${esc(tz.tz_code)}</div>
-          <div class="kanban-card-title">${esc(tz.title)}</div>
-          ${tz.assignee_name ? `<div class="kanban-card-owner">${esc(tz.assignee_name)}</div>` : (tz.owner ? `<div class="kanban-card-owner">${esc(tz.owner)}</div>` : '')}
-          ${tz.completion_notes ? '<span class="kanban-flag kanban-flag-notes" title="Есть примечания к выполнению">📝 Примечания</span>' : ''}
-          ${flagsHtml}
-        </div>
-      </div>`;
-    }
+    for (const tz of cards) html += kanbanCardHtml(tz, false);
 
     html += '</div></div>';
   }
   html += '</div>';
   tzListContainer.innerHTML = html;
 
-  // Bind drag-and-drop
   initKanbanDnD();
-
-  // Bind card click
   tzListContainer.querySelectorAll('.kanban-card').forEach((card) => {
     card.addEventListener('click', () => openTzDetail(card.dataset.tzId));
   });
@@ -2985,6 +3030,7 @@ function openBoardSettingsModal() {
           <span class="board-col-drag" title="Перетащить">&#x2630;</span>
           <input type="color" class="board-col-color" value="${esc(c.color)}" data-col-id="${esc(c.id)}" title="Цвет" />
           <input class="board-col-name" value="${esc(c.name)}" data-col-id="${esc(c.id)}" />
+          <input type="number" class="board-col-wip" value="${c.wip_limit || 0}" data-col-id="${esc(c.id)}" min="0" title="WIP-лимит (0 = без ограничения)" style="width:50px" />
           <button type="button" class="board-col-hide-btn" data-col-id="${esc(c.id)}" title="${c.hidden ? 'Показать' : 'Скрыть'}">${c.hidden ? '👁' : '👁‍🗨'}</button>
           <button type="button" class="board-col-del-btn" data-col-id="${esc(c.id)}" title="Удалить">✕</button>
         </div>`).join('')}
@@ -3084,6 +3130,24 @@ function openBoardSettingsModal() {
           Object.assign(board, result.board);
           const idx = state.tzBoards.findIndex(b => b.id === board.id);
           if (idx >= 0) state.tzBoards[idx] = result.board;
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+
+    // Column WIP limit edit
+    document.querySelectorAll('.board-col-wip').forEach((inp) => {
+      inp.addEventListener('change', async () => {
+        const colId = inp.dataset.colId;
+        try {
+          const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin, wip_limit: parseInt(inp.value, 10) || 0 })
+          });
+          Object.assign(board, result.board);
+          const idx = state.tzBoards.findIndex(b => b.id === board.id);
+          if (idx >= 0) state.tzBoards[idx] = result.board;
+          showToast('WIP-лимит обновлён', 'ok');
         } catch (err) { showToast(err.message, 'danger'); }
       });
     });
@@ -3818,27 +3882,6 @@ async function performGlobalSearch(q) {
   } catch { hide(globalSearchResults); }
 }
 
-/* ── TZ Task Links ── */
-
-function renderTzLinks(tz, allTzList) {
-  const links = tz.linked_tz_ids || [];
-  let html = '<div class="tz-links-section"><h4>Связанные задачи</h4>';
-  if (links.length) {
-    html += '<div class="tz-links-list">';
-    for (const lid of links) {
-      const linked = allTzList ? allTzList.find((t) => t.id === lid) : null;
-      if (linked) {
-        html += `<span class="tz-link-chip" data-tz-id="${esc(lid)}">${esc(linked.tz_code)} — ${esc(linked.title.slice(0, 40))}<button class="tz-link-remove" data-lid="${esc(lid)}" title="Убрать">&times;</button></span>`;
-      }
-    }
-    html += '</div>';
-  }
-  if (state.adminRole === 'superadmin') {
-    html += `<div class="tz-link-add-row"><select id="tzLinkAddSelect"><option value="">+ Добавить связь...</option></select></div>`;
-  }
-  html += '</div>';
-  return html;
-}
 
 /* ── Metrics Dashboard ── */
 
@@ -3966,17 +4009,11 @@ function renderKanbanSwimlanes(data, swimlaneType) {
     return;
   }
   if (!tzListContainer) return;
-  const { transitions, statusLabels, boardColumns, swimlanes } = data;
+  const { transitions, statusLabels, swimlanes } = data;
   state.kanbanTransitions = transitions || {};
-  const displayOrder = boardColumns
-    ? boardColumns.filter((c) => !c.hidden).sort((a, b) => a.order - b.order).map((c) => c.id)
-    : Object.keys(data.columns);
-  const colorMap = boardColumns
-    ? Object.fromEntries(boardColumns.map((c) => [c.id, c.color]))
-    : {};
+  const { displayOrder, colorMap } = kanbanResolveDisplay(data);
 
   let html = '<div class="kanban-swimlane-board">';
-  // Header row
   html += '<div class="kanban-swimlane-header"><div class="kanban-sl-label"></div>';
   for (const status of displayOrder) {
     const color = colorMap[status] || '#edf2f7';
@@ -3988,13 +4025,8 @@ function renderKanbanSwimlanes(data, swimlaneType) {
     html += `<div class="kanban-swimlane-row"><div class="kanban-sl-label">${esc(sl.label)}</div>`;
     for (const status of displayOrder) {
       const cards = sl.columns[status] || [];
-      html += `<div class="kanban-sl-cell" data-status="${esc(status)}">`;
-      for (const tz of cards) {
-        html += `<div class="kanban-card kanban-card-mini" data-tz-id="${esc(tz.id)}" data-status="${esc(tz.status)}">
-          <div class="kanban-card-prio kanban-prio-${esc(tz.priority)}"></div>
-          <div class="kanban-card-body"><div class="kanban-card-code">${esc(tz.tz_code)}</div><div class="kanban-card-title">${esc(tz.title)}</div></div>
-        </div>`;
-      }
+      html += `<div class="kanban-sl-cell kanban-column" data-status="${esc(status)}">`;
+      for (const tz of cards) html += kanbanCardHtml(tz, true);
       html += '</div>';
     }
     html += '</div>';
@@ -4002,6 +4034,7 @@ function renderKanbanSwimlanes(data, swimlaneType) {
   html += '</div>';
   tzListContainer.innerHTML = html;
 
+  initKanbanDnD();
   tzListContainer.querySelectorAll('.kanban-card').forEach((card) => {
     card.addEventListener('click', () => openTzDetail(card.dataset.tzId));
   });

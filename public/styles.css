@@ -1172,6 +1172,8 @@ button{
   border:2px solid transparent;transition:border-color .2s,opacity .2s;
   scroll-snap-align:start;
 }
+.kanban-wip-over{border-color:var(--danger) !important;background:#fff5f5}
+.kanban-wip-over .kanban-col-count{color:var(--danger);font-weight:700}
 .kanban-column.drag-over{border-color:var(--accent);background:#e8f4fd}
 .kanban-column.drag-forbidden{opacity:.4}
 .kanban-column-header{
@@ -1207,6 +1209,10 @@ button{
 .kanban-flag-overdue{background:var(--danger-soft);color:var(--danger)}
 .kanban-flag-soon{background:#fffff0;color:#b7791f;border:1px solid #fefcbf}
 .kanban-flag-notes{background:#fef3c7;color:#92400e;border:1px solid #fde68a}
+.kanban-deadline{font-size:10px;margin-left:6px;padding:1px 5px;border-radius:4px;font-weight:600;vertical-align:middle}
+.kanban-dl-overdue{background:var(--danger-soft);color:var(--danger)}
+.kanban-dl-soon{background:#fffff0;color:#b7791f}
+.kanban-dl-ok{background:#f0fff4;color:#276749}
 
 /* Approve badges */
 .tz-approve-row{margin:8px 0;display:flex;align-items:center;gap:8px;flex-wrap:wrap}
@@ -1484,6 +1490,17 @@ button{
   border-radius:8px;font:inherit;font-size:13px;color:var(--text-sec);
 }
 .tz-links-empty{margin:0 0 8px;font-size:13px;color:var(--disabled)}
+.tz-link-add-row{position:relative}
+.tz-link-search-results{
+  position:absolute;top:100%;left:0;width:100%;max-width:400px;max-height:200px;overflow-y:auto;
+  background:#fff;border:1.5px solid var(--border);border-radius:8px;box-shadow:var(--shadow);z-index:10;
+}
+.tz-link-search-item{
+  padding:8px 12px;font-size:13px;cursor:pointer;border-bottom:1px solid var(--border);
+}
+.tz-link-search-item:last-child{border-bottom:none}
+.tz-link-search-item:hover{background:#edf2f7}
+.tz-link-search-empty{padding:8px 12px;font-size:13px;color:var(--disabled)}
 
 /* ── Kanban Swimlanes ── */
 .tz-swimlane-select{max-width:160px}

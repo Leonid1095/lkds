@@ -21,52 +21,59 @@
         "hidden": false
       },
       {
+        "id": "waiting_analysis",
+        "name": "Ждёт анализа",
+        "color": "#fef3c7",
+        "order": 2,
+        "hidden": false
+      },
+      {
         "id": "analysis",
         "name": "Анализ",
         "color": "#bee3f8",
-        "order": 2,
+        "order": 3,
         "hidden": false
       },
       {
         "id": "development",
         "name": "Разработка",
         "color": "#c3dafe",
-        "order": 3,
+        "order": 4,
         "hidden": false
       },
       {
         "id": "testing",
         "name": "Тестирование",
         "color": "#e9d8fd",
-        "order": 4,
+        "order": 5,
         "hidden": false
       },
       {
         "id": "release",
         "name": "Релиз",
         "color": "#feebc8",
-        "order": 5,
+        "order": 6,
         "hidden": false
       },
       {
         "id": "production",
         "name": "В продакшене",
         "color": "#c6f6d5",
-        "order": 6,
+        "order": 7,
         "hidden": false
       },
       {
         "id": "partial",
         "name": "В продакшене (частично)",
         "color": "#fde68a",
-        "order": 7,
+        "order": 8,
         "hidden": false
       },
       {
         "id": "cancelled",
         "name": "Отменено",
         "color": "#fed7d7",
-        "order": 8,
+        "order": 9,
         "hidden": false
       }
     ],
@@ -88,6 +95,82 @@
     ],
     "is_default": true,
     "created_at": "2026-03-04T13:34:05.573Z",
-    "updated_at": "2026-03-04T13:34:05.573Z"
+    "updated_at": "2026-03-04T14:42:00.796Z"
+  },
+  {
+    "id": "6decb557-e29f-4f5c-b2a4-07622b28b89d",
+    "name": "Баги/Задачи",
+    "slug": "баги",
+    "code_prefix": "BD",
+    "description": "Фиксация багов и отслеживание их статусов",
+    "columns": [
+      {
+        "id": "todo",
+        "name": "К выполнению",
+        "color": "#edf2f7",
+        "order": 0,
+        "hidden": false
+      },
+      {
+        "id": "in_progress",
+        "name": "В работе",
+        "color": "#bee3f8",
+        "order": 1,
+        "hidden": false
+      },
+      {
+        "id": "done",
+        "name": "Готово",
+        "color": "#c6f6d5",
+        "order": 2,
+        "hidden": false
+      }
+    ],
+    "default_column": "todo",
+    "systems": [],
+    "types": [
+      "Задача"
+    ],
+    "is_default": false,
+    "created_at": "2026-03-05T07:46:44.793Z",
+    "updated_at": "2026-03-05T14:06:05.900Z"
+  },
+  {
+    "id": "25e5c2a6-1db4-42de-b463-5a8aa4f21453",
+    "name": "Задачи",
+    "slug": "задачи",
+    "code_prefix": "BD",
+    "description": "Можно фиксировать свои личные задачи или задачи команды",
+    "columns": [
+      {
+        "id": "todo",
+        "name": "К выполнению",
+        "color": "#edf2f7",
+        "order": 0,
+        "hidden": false
+      },
+      {
+        "id": "in_progress",
+        "name": "В работе",
+        "color": "#bee3f8",
+        "order": 1,
+        "hidden": false
+      },
+      {
+        "id": "done",
+        "name": "Готово",
+        "color": "#c6f6d5",
+        "order": 2,
+        "hidden": false
+      }
+    ],
+    "default_column": "todo",
+    "systems": [],
+    "types": [
+      "Задача"
+    ],
+    "is_default": false,
+    "created_at": "2026-03-05T13:58:09.404Z",
+    "updated_at": "2026-03-05T13:58:45.486Z"
   }
 ]

@@ -741,7 +741,7 @@
     "date_release_deadline": "2026-03-31",
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T11:36:30.373Z",
-    "updated_at": "2026-03-04T11:36:30.373Z",
+    "updated_at": "2026-03-05T06:40:01.626Z",
     "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
@@ -1014,7 +1014,7 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:03:09.521Z",
-    "updated_at": "2026-03-04T13:03:09.521Z",
+    "updated_at": "2026-03-06T08:35:32.921Z",
     "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
@@ -1182,7 +1182,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:47:58.803Z",
-    "updated_at": "2026-03-04T13:47:58.803Z"
+    "updated_at": "2026-03-04T13:47:58.803Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "84b98306-478f-4cef-9b74-2917a3024627",
@@ -1202,7 +1203,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:50:56.621Z",
-    "updated_at": "2026-03-04T13:50:56.621Z"
+    "updated_at": "2026-03-04T13:50:56.621Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "8be87242-6af7-4e44-ad49-5cf323be7d59",
@@ -1222,7 +1224,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:53:36.621Z",
-    "updated_at": "2026-03-04T13:53:36.621Z"
+    "updated_at": "2026-03-04T13:53:36.621Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "25f1921d-b191-4db3-b55d-e906b2dd19af",
@@ -1242,7 +1245,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:54:59.384Z",
-    "updated_at": "2026-03-04T13:54:59.384Z"
+    "updated_at": "2026-03-04T13:54:59.384Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "491b2b2a-34b4-48b3-aed7-d7e1e9c534ca",
@@ -1262,7 +1266,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:56:21.239Z",
-    "updated_at": "2026-03-04T13:56:21.239Z"
+    "updated_at": "2026-03-04T13:56:21.239Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "3d3fbc69-1c13-45bf-a6e1-e217ba4270c1",
@@ -1282,7 +1287,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:57:24.506Z",
-    "updated_at": "2026-03-04T13:57:24.506Z"
+    "updated_at": "2026-03-04T13:57:24.506Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "7c43f13a-a747-40ae-b511-58c8603378ab",
@@ -1302,7 +1308,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:58:34.068Z",
-    "updated_at": "2026-03-04T13:58:34.068Z"
+    "updated_at": "2026-03-04T13:58:34.068Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "eba5fb83-6181-4e94-bcca-fbc3b7567896",
@@ -1322,7 +1329,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T13:59:56.292Z",
-    "updated_at": "2026-03-04T13:59:56.292Z"
+    "updated_at": "2026-03-04T13:59:56.292Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "b5af9083-3f45-4922-a1a1-babd5a46498b",
@@ -1342,7 +1350,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:01:53.029Z",
-    "updated_at": "2026-03-04T14:01:53.029Z"
+    "updated_at": "2026-03-04T14:01:53.029Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "0879461e-3d18-4f75-abcc-cea2c1fb9fb7",
@@ -1362,7 +1371,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:02:55.875Z",
-    "updated_at": "2026-03-04T14:02:55.875Z"
+    "updated_at": "2026-03-04T14:02:55.875Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "0268b504-fd22-414c-9eed-90cf662faa1a",
@@ -1382,7 +1392,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:04:38.020Z",
-    "updated_at": "2026-03-04T14:04:38.020Z"
+    "updated_at": "2026-03-04T14:04:38.020Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "75f22e06-0709-4395-8bb3-113b5f3896eb",
@@ -1402,7 +1413,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:07:57.114Z",
-    "updated_at": "2026-03-04T14:07:57.114Z"
+    "updated_at": "2026-03-04T14:07:57.114Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "8b72d110-c41f-4224-9e2b-ce2d56832eed",
@@ -1422,7 +1434,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:09:55.109Z",
-    "updated_at": "2026-03-04T14:09:55.109Z"
+    "updated_at": "2026-03-04T14:09:55.109Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "17bd81e2-2b15-4c0e-aa37-196dc055b742",
@@ -1442,7 +1455,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:10:54.611Z",
-    "updated_at": "2026-03-04T14:10:54.611Z"
+    "updated_at": "2026-03-04T14:10:54.611Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "3e2d7e89-f4ad-446e-90dd-7b29c8c503e6",
@@ -1462,7 +1476,8 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:11:42.321Z",
-    "updated_at": "2026-03-04T14:11:42.321Z"
+    "updated_at": "2026-03-04T14:11:42.321Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
     "id": "cb59a33f-939c-4522-a048-a1839701d7cf",
@@ -1482,6 +1497,139 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-04T14:14:31.055Z",
-    "updated_at": "2026-03-04T14:14:31.055Z"
+    "updated_at": "2026-03-04T14:14:31.055Z",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
+  },
+  {
+    "id": "4d7667c0-867a-41bd-8157-49eccacbb4fe",
+    "board_id": "25e5c2a6-1db4-42de-b463-5a8aa4f21453",
+    "tz_code": "BD-ALIS-0001",
+    "title": "Контрагент ООО Логопер",
+    "system": "ALIS",
+    "type": "Заявка",
+    "priority": "medium",
+    "status": "in_progress",
+    "description": "Необходимо проконтролировать ООО Логопер когда появится настоящий номер договора.",
+    "owner": "Фатыхов Ленар Рустамович",
+    "link_confluence": "",
+    "link_jira": "",
+    "completion_notes": "",
+    "date_analysis_deadline": "2026-03-12",
+    "date_dev_deadline": null,
+    "date_release_deadline": null,
+    "assignee_id": null,
+    "assigned_by_id": null,
+    "deadline": null,
+    "linked_tz_ids": [],
+    "created_by": "Фатыхов Ленар Рустамович",
+    "created_by_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "created_at": "2026-03-05T14:05:42.340Z",
+    "updated_at": "2026-03-05T14:05:42.340Z"
+  },
+  {
+    "id": "892bb846-6a3a-41aa-860c-58b899846bb3",
+    "board_id": "6decb557-e29f-4f5c-b2a4-07622b28b89d",
+    "tz_code": "BD-ALIS-0002",
+    "title": "Передача поля «Комментарий» из заявки КИС в мастер операций ТОС",
+    "system": "ALIS",
+    "type": "ТЗ",
+    "priority": "low",
+    "status": "todo",
+    "description": "В КИС в заявке есть поле «Комментарий», однако в мастере операций ТОС оно не отображается. Оператор, выполняющий операцию в ТОС, не видит комментарий, оставленный менеджером в КИС. Поле фактически не используется.",
+    "owner": "",
+    "link_confluence": "",
+    "link_jira": "",
+    "completion_notes": "",
+    "date_analysis_deadline": "2026-03-31",
+    "date_dev_deadline": null,
+    "date_release_deadline": null,
+    "assignee_id": null,
+    "assigned_by_id": null,
+    "deadline": null,
+    "linked_tz_ids": [],
+    "created_by": "Фатыхов Ленар Рустамович",
+    "created_by_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "created_at": "2026-03-05T14:25:20.412Z",
+    "updated_at": "2026-03-05T14:25:20.412Z"
+  },
+  {
+    "id": "1276f476-f293-4a11-91a4-7fa7305c3dce",
+    "board_id": "6decb557-e29f-4f5c-b2a4-07622b28b89d",
+    "tz_code": "BD-TOS-0001",
+    "title": "Автозаполнение рейсов на главном экране МО ТОС",
+    "system": "TOS",
+    "type": "ТЗ",
+    "priority": "medium",
+    "status": "todo",
+    "description": "Проблема:\nПри входе в МО ТОС — пустой экран. Каждый раз нужно вручную: Выбрать рейс → Все рейсы → найти нужный.\n\nТребуется:\nПри открытии МО ТОС автоматически отображать актуальные рейсы (на текущую дату / активные) без дополнительных действий со стороны пользователя.",
+    "owner": "Фатыхов Ленар Рустамович",
+    "link_confluence": "",
+    "link_jira": "",
+    "completion_notes": "",
+    "date_analysis_deadline": "2026-04-01",
+    "date_dev_deadline": null,
+    "date_release_deadline": null,
+    "assignee_id": null,
+    "assigned_by_id": null,
+    "deadline": null,
+    "linked_tz_ids": [],
+    "created_by": "Фатыхов Ленар Рустамович",
+    "created_by_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "created_at": "2026-03-05T14:30:24.491Z",
+    "updated_at": "2026-03-05T14:30:24.491Z"
+  },
+  {
+    "id": "3106ea92-8e0b-46c5-a5f7-c5057c2c8950",
+    "board_id": "25e5c2a6-1db4-42de-b463-5a8aa4f21453",
+    "tz_code": "BD-ALIS-0003",
+    "title": "Запросить именно ТЗ которые сейчас на анализе или в разработке",
+    "system": "ALIS",
+    "type": "ТЗ",
+    "priority": "high",
+    "status": "todo",
+    "description": "Запросить именно ТЗ которые сейчас на анализе или в разработке. Т.е. мне нужно просто запросить у 1С и ALIS технические задания которые сейчас в анализе и в работе.",
+    "owner": "Фатыхов Ленар Рустамович",
+    "link_confluence": "",
+    "link_jira": "",
+    "completion_notes": "",
+    "date_analysis_deadline": null,
+    "date_dev_deadline": null,
+    "date_release_deadline": null,
+    "assignee_id": null,
+    "assigned_by_id": null,
+    "deadline": null,
+    "linked_tz_ids": [],
+    "created_by": "Фатыхов Ленар Рустамович",
+    "created_by_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "created_at": "2026-03-06T07:06:23.381Z",
+    "updated_at": "2026-03-06T07:06:23.381Z"
+  },
+  {
+    "id": "d114f34d-fdad-40db-bb28-5433aba56bdc",
+    "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572",
+    "tz_code": "TZ-TOS-0017",
+    "title": "Безномерные заявки ЖД",
+    "system": "TOS",
+    "type": "ТЗ",
+    "priority": "low",
+    "status": "development",
+    "description": "Задача в данный момент в разработке:\nОбеспечить возможность формирования и обработки заявок на вывоз (КП-ЖД) в системе ALIS при отсутствии точных номеров вагонов и/или контейнеров на этапе планирования.",
+    "owner": "Фатыхов Ленар Рустамович",
+    "link_confluence": "https://confluence.lkds.alabuga.ru/x/AYB1B",
+    "link_jira": "https://jira.lkds.alabuga.ru/browse/TOS-346",
+    "completion_notes": "",
+    "date_analysis_deadline": null,
+    "date_dev_deadline": null,
+    "date_release_deadline": null,
+    "assignee_id": null,
+    "assigned_by_id": null,
+    "deadline": null,
+    "linked_tz_ids": [
+      "1f84a80a-42b4-4439-9539-7931c20d2f74"
+    ],
+    "created_by": "Фатыхов Ленар Рустамович",
+    "created_by_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "created_at": "2026-03-06T07:54:07.871Z",
+    "updated_at": "2026-03-06T07:54:17.699Z"
   }
 ]

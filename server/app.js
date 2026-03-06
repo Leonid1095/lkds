@@ -10,7 +10,7 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createTransport } from 'nodemailer';
 import ExcelJS from 'exceljs';
-import { computeTzFlags as _computeTzFlags, TZ_STATUS_ORD as _TZ_STATUS_ORD, TZ_STATUS_LABELS as _TZ_STATUS_LABELS, TZ_STATUSES as _TZ_STATUSES, TZ_TYPES as _TZ_TYPES, TZ_USER_TYPES as _TZ_USER_TYPES } from './utils.js';
+import { computeTzFlags as _computeTzFlags, TZ_STATUS_ORD as _TZ_STATUS_ORD, TZ_STATUS_LABELS as _TZ_STATUS_LABELS, TZ_STATUSES as _TZ_STATUSES, TZ_TYPES as _TZ_TYPES, TZ_USER_TYPES as _TZ_USER_TYPES, buildStatusOrd as _buildStatusOrd } from './utils.js';
 
 dotenv.config();
 
@@ -47,7 +47,8 @@ const FILES = {
   boards: path.join(dataDir, 'boards.json'),
   aiTasks: path.join(dataDir, 'ai-tasks.json'),
   tzComments: path.join(dataDir, 'tz-comments.json'),
-  tzTemplates: path.join(dataDir, 'tz-templates.json')
+  tzTemplates: path.join(dataDir, 'tz-templates.json'),
+  auditLog: path.join(dataDir, 'audit-log.json')
 };
 
 /* ── Security middleware ── */
@@ -93,6 +94,19 @@ const adminLimiter = rateLimit({
 });
 
 app.use('/api/admin', adminLimiter);
+
+const userActionLimiter = rateLimit({
+  windowMs: 60 * 1000,
+  max: 30,
+  message: { message: 'Слишком много запросов. Подождите минуту.' },
+  standardHeaders: true,
+  legacyHeaders: false
+});
+app.use('/api/tz', userActionLimiter);
+app.use('/api/bookings', userActionLimiter);
+app.use('/api/tickets', userActionLimiter);
+app.use('/api/it-tickets', userActionLimiter);
+app.use('/api/suggestions', userActionLimiter);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -367,7 +381,18 @@ async function readJson(filePath, fallback) {
 }
 
 async function writeJson(filePath, value) {
-  await fs.writeFile(filePath, JSON.stringify(value, null, 2) + '\n', 'utf-8');
+  const tmp = filePath + '.tmp';
+  await fs.writeFile(tmp, JSON.stringify(value, null, 2) + '\n', 'utf-8');
+  await fs.rename(tmp, filePath);
+}
+
+async function auditLog(action, actor, details) {
+  try {
+    const log = await readJson(FILES.auditLog, []);
+    log.push({ action, actor, details, ts: new Date().toISOString() });
+    if (log.length > 5000) log.splice(0, log.length - 5000);
+    await writeJson(FILES.auditLog, log);
+  } catch (e) { console.warn('audit log write failed:', e.message); }
 }
 
 /* ── File lock (in-memory mutex for read-modify-write) ── */
@@ -448,13 +473,14 @@ async function migrateBoards() {
       columns: [
         { id: 'draft', name: 'Черновик', color: '#edf2f7', order: 0, hidden: false },
         { id: 'review', name: 'На рассмотрении', color: '#fefcbf', order: 1, hidden: false },
-        { id: 'analysis', name: 'Анализ', color: '#bee3f8', order: 2, hidden: false },
-        { id: 'development', name: 'Разработка', color: '#c3dafe', order: 3, hidden: false },
-        { id: 'testing', name: 'Тестирование', color: '#e9d8fd', order: 4, hidden: false },
-        { id: 'release', name: 'Релиз', color: '#feebc8', order: 5, hidden: false },
-        { id: 'production', name: 'В продакшене', color: '#c6f6d5', order: 6, hidden: false },
-        { id: 'partial', name: 'В продакшене (частично)', color: '#fde68a', order: 7, hidden: false },
-        { id: 'cancelled', name: 'Отменено', color: '#fed7d7', order: 8, hidden: false }
+        { id: 'waiting_analysis', name: 'Ждёт анализа', color: '#fef3c7', order: 2, hidden: false },
+        { id: 'analysis', name: 'Анализ', color: '#bee3f8', order: 3, hidden: false },
+        { id: 'development', name: 'Разработка', color: '#c3dafe', order: 4, hidden: false },
+        { id: 'testing', name: 'Тестирование', color: '#e9d8fd', order: 5, hidden: false },
+        { id: 'release', name: 'Релиз', color: '#feebc8', order: 6, hidden: false },
+        { id: 'production', name: 'В продакшене', color: '#c6f6d5', order: 7, hidden: false },
+        { id: 'partial', name: 'В продакшене (частично)', color: '#fde68a', order: 8, hidden: false },
+        { id: 'cancelled', name: 'Отменено', color: '#fed7d7', order: 9, hidden: false }
       ],
       default_column: 'draft',
       systems: ['ALIS', 'TOS', 'WMS', '1C_CRM', 'OTHER'],
@@ -516,6 +542,27 @@ const TZ_TRANSITIONS = Object.fromEntries(
 const TZ_STATUS_ORD = _TZ_STATUS_ORD;
 const TZ_STATUS_LABELS = _TZ_STATUS_LABELS;
 const computeTzFlags = _computeTzFlags;
+const buildStatusOrd = _buildStatusOrd;
+
+/** Cache statusOrd per board to avoid rebuilding on every TZ */
+function makeBoardOrdCache(boards) {
+  const cache = new Map();
+  return (boardId) => {
+    if (!boardId) return TZ_STATUS_ORD;
+    if (cache.has(boardId)) return cache.get(boardId);
+    const board = boards.find(b => b.id === boardId);
+    const ord = board ? buildStatusOrd(board.columns) : TZ_STATUS_ORD;
+    cache.set(boardId, ord);
+    return ord;
+  };
+}
+
+/** Get status labels map for a board (or fallback to global) */
+function getBoardStatusLabels(boards, boardId) {
+  if (!boardId) return TZ_STATUS_LABELS;
+  const board = boards.find(b => b.id === boardId);
+  return board ? Object.fromEntries(board.columns.map(c => [c.id, c.name])) : TZ_STATUS_LABELS;
+}
 
 function generateTzCode(allTz, system, codePrefix = 'TZ') {
   const prefix = `${codePrefix}-${system}-`;
@@ -789,7 +836,7 @@ app.post('/api/bookings', async (req, res) => {
     const bookings = await readJson(FILES.bookings, []);
     const candidate = {
       id: randomUUID(), roomId, date, startHour, endHour,
-      pin, fullName: user.fullName, contact: user.contact, topic,
+      userId: user.id, fullName: user.fullName, contact: user.contact, topic,
       createdAt: new Date().toISOString()
     };
 
@@ -1234,16 +1281,10 @@ app.post('/api/admin/update-user', async (req, res) => {
       target.pinSalt = salt;
       // Invalidate any cached entry for old pin
       invalidatePinCacheByUserId(targetId);
-      // Update bookings by fullName (since we no longer store old pin)
-      const bookings = await readJson(FILES.bookings, []);
-      let changed = false;
-      for (const b of bookings) {
-        if (b.fullName === target.fullName) { b.pin = newPin; changed = true; }
-      }
-      if (changed) await writeJson(FILES.bookings, bookings);
     }
 
     await writeJson(FILES.users, users);
+    auditLog('update-user', authUser.fullName, { targetId, fields: Object.keys(req.body).filter(k => k !== 'pin') });
     return res.json({ message: 'Данные обновлены.' });
   });
 });
@@ -1261,6 +1302,7 @@ app.post('/api/admin/toggle-admin', async (req, res) => {
   target.isAdmin = !target.isAdmin;
   await writeJson(FILES.users, users);
   invalidatePinCacheByUserId(targetId);
+  auditLog('toggle-admin', 'admin', { targetId, targetName: target.fullName, isAdmin: target.isAdmin });
   return res.json({ id: targetId, isAdmin: !!target.isAdmin });
 });
 
@@ -1288,6 +1330,7 @@ app.post('/api/admin/set-role', async (req, res) => {
 
   await writeJson(FILES.users, users);
   invalidatePinCacheByUserId(targetId);
+  auditLog('set-role', 'admin', { targetId, targetName: target.fullName, role });
   return res.json({ id: targetId, role });
 });
 
@@ -1353,7 +1396,7 @@ app.post('/api/bookings/:id/cancel', async (req, res) => {
     const idx = bookings.findIndex((b) => b.id === req.params.id);
     if (idx === -1) return res.status(404).json({ message: 'Бронирование не найдено.' });
 
-    if (!admin && bookings[idx].pin !== pin && bookings[idx].fullName !== user.fullName)
+    if (!admin && bookings[idx].userId !== user.id && bookings[idx].fullName !== user.fullName)
       return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
 
     bookings.splice(idx, 1);
@@ -1377,7 +1420,7 @@ app.patch('/api/bookings/:id', async (req, res) => {
 
     const booking = bookings[idx];
 
-    if (!admin && booking.pin !== pin && booking.fullName !== user.fullName)
+    if (!admin && booking.userId !== user.id && booking.fullName !== user.fullName)
       return res.status(403).json({ message: 'Можно отменить только свою бронь.' });
 
     if (isNaN(cancelHour) || cancelHour < booking.startHour || cancelHour >= booking.endHour)
@@ -1398,7 +1441,7 @@ app.patch('/api/bookings/:id', async (req, res) => {
         date: booking.date,
         startHour: cancelHour + step,
         endHour: booking.endHour,
-        pin: booking.pin,
+        userId: booking.userId,
         fullName: booking.fullName,
         contact: booking.contact,
         topic: booking.topic,
@@ -1509,8 +1552,10 @@ app.delete('/api/boards/:id', async (req, res) => {
     const hasCards = allTz.some(t => t.board_id === req.params.id);
     if (hasCards) return res.status(400).json({ message: 'Нельзя удалить доску с карточками. Сначала переместите или удалите карточки.' });
 
+    const boardName = boards[idx].name;
     boards.splice(idx, 1);
     await writeJson(FILES.boards, boards);
+    auditLog('delete-board', 'admin', { boardId: req.params.id, boardName });
     return res.json({ message: 'Доска удалена.' });
   }));
 });
@@ -1534,8 +1579,9 @@ app.post('/api/boards/:id/columns', async (req, res) => {
     let colId = getColumnSlug(name);
     if (board.columns.some(c => c.id === colId)) colId += '_' + Date.now().toString(36);
 
+    const wipLimit = parseInt(req.body.wip_limit, 10);
     const maxOrder = board.columns.reduce((m, c) => Math.max(m, c.order), -1);
-    const col = { id: colId, name, color, order: maxOrder + 1, hidden: false };
+    const col = { id: colId, name, color, order: maxOrder + 1, hidden: false, wip_limit: wipLimit > 0 ? wipLimit : 0 };
     board.columns.push(col);
     board.updated_at = new Date().toISOString();
 
@@ -1561,6 +1607,10 @@ app.put('/api/boards/:id/columns/:colId', async (req, res) => {
       const c = String(req.body.color).trim();
       if (!isValidHexColor(c)) return res.status(400).json({ message: 'Цвет должен быть в формате #RGB или #RRGGBB.' });
       col.color = c;
+    }
+    if (req.body.wip_limit !== undefined) {
+      const wl = parseInt(req.body.wip_limit, 10);
+      col.wip_limit = wl > 0 ? wl : 0;
     }
     board.updated_at = new Date().toISOString();
 
@@ -1693,8 +1743,10 @@ app.post('/api/tz', async (req, res) => {
   const priority = String(req.body.priority || '').trim();
   const description = clip(String(req.body.description || '').trim(), 5000);
   const owner = clip(String(req.body.owner || '').trim(), 100);
-  const link_confluence = clip(String(req.body.link_confluence || '').trim(), 500);
-  const link_jira = clip(String(req.body.link_jira || '').trim(), 500);
+  let link_confluence = clip(String(req.body.link_confluence || '').trim(), 500);
+  let link_jira = clip(String(req.body.link_jira || '').trim(), 500);
+  if (link_confluence && !/^https?:\/\//i.test(link_confluence)) link_confluence = '';
+  if (link_jira && !/^https?:\/\//i.test(link_jira)) link_jira = '';
   const completion_notes = clip(String(req.body.completion_notes || '').trim(), 5000);
   const date_analysis_deadline = String(req.body.date_analysis_deadline || '').trim();
   const date_dev_deadline = String(req.body.date_dev_deadline || '').trim();
@@ -1858,8 +1910,8 @@ app.put('/api/tz/:id', async (req, res) => {
       if (field === 'title') newVal = clip(newVal, 300);
       if (field === 'description') newVal = clip(newVal, 5000);
       if (field === 'owner') newVal = clip(newVal, 100);
-      if (field === 'link_confluence') newVal = clip(newVal, 500);
-      if (field === 'link_jira') newVal = clip(newVal, 500);
+      if (field === 'link_confluence') { newVal = clip(newVal, 500); if (newVal && !/^https?:\/\//i.test(newVal)) continue; }
+      if (field === 'link_jira') { newVal = clip(newVal, 500); if (newVal && !/^https?:\/\//i.test(newVal)) continue; }
       if (field === 'completion_notes') newVal = clip(newVal, 5000);
       if (['date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline', 'deadline'].includes(field)) {
         if (newVal && !isValidDate(newVal)) continue;
@@ -1876,8 +1928,39 @@ app.put('/api/tz/:id', async (req, res) => {
       if (field === 'linked_tz_ids') {
         if (!Array.isArray(newVal)) continue;
         newVal = newVal.filter((lid) => UUID_RE.test(lid) && lid !== id).slice(0, 20);
+        const oldLinks = tz.linked_tz_ids || [];
+        const added = newVal.filter((l) => !oldLinks.includes(l));
+        const removed = oldLinks.filter((l) => !newVal.includes(l));
         tz.linked_tz_ids = newVal;
-        continue; // skip history for array field
+        // Bidirectional: sync linked_tz_ids on counterpart TZ records
+        for (const lid of added) {
+          const other = allTz.find((t) => t.id === lid);
+          if (other) {
+            const otherLinks = other.linked_tz_ids || [];
+            if (!otherLinks.includes(id)) {
+              other.linked_tz_ids = [...otherLinks, id];
+              await recordTzHistory(lid, 'linked_tz_ids', '', tz.tz_code || id, changedBy);
+            }
+          }
+        }
+        for (const lid of removed) {
+          const other = allTz.find((t) => t.id === lid);
+          if (other && other.linked_tz_ids) {
+            other.linked_tz_ids = other.linked_tz_ids.filter((l) => l !== id);
+            await recordTzHistory(lid, 'linked_tz_ids', tz.tz_code || id, '', changedBy);
+          }
+        }
+        // Record history on this TZ too
+        if (added.length || removed.length) {
+          const addedCodes = added.map((l) => { const t = allTz.find((x) => x.id === l); return t ? t.tz_code : l.slice(0, 8); });
+          const removedCodes = removed.map((l) => { const t = allTz.find((x) => x.id === l); return t ? t.tz_code : l.slice(0, 8); });
+          const desc = [
+            ...(addedCodes.length ? [`+${addedCodes.join(', ')}`] : []),
+            ...(removedCodes.length ? [`-${removedCodes.join(', ')}`] : [])
+          ].join('; ');
+          await recordTzHistory(tz.id, 'linked_tz_ids', '', desc, changedBy);
+        }
+        continue;
       }
 
       const oldVal = tz[field] ?? null;
@@ -1894,7 +1977,7 @@ app.put('/api/tz/:id', async (req, res) => {
   });
 });
 
-function filterTz(allTz, body, usersMap) {
+function filterTz(allTz, body, usersMap, boards) {
   const fBoardId = String(body.board_id || '').trim();
   const fSystem = String(body.system || '').trim();
   const fStatus = String(body.status || '').trim();
@@ -1918,8 +2001,9 @@ function filterTz(allTz, body, usersMap) {
   if (fAssignee) items = items.filter((t) => t.assignee_id === fAssignee);
 
   // Phase 2: compute flags + assignee names only for remaining items
+  const getOrd = makeBoardOrdCache(boards || []);
   items = items.map((tz) => {
-    const item = { ...tz, flags: computeTzFlags(tz) };
+    const item = { ...tz, flags: computeTzFlags(tz, getOrd(tz.board_id)) };
     if (usersMap && tz.assignee_id) item.assignee_name = usersMap.get(tz.assignee_id) || null;
     return item;
   });
@@ -1949,8 +2033,9 @@ app.post('/api/admin/tz', async (req, res) => {
 
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
+  const boards = await readJson(FILES.boards, []);
   const usersMap = new Map(users.map(u => [u.id, u.fullName]));
-  const items = filterTz(allTz, req.body, usersMap);
+  const items = filterTz(allTz, req.body, usersMap, boards);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
   const { page, pageSize } = req.body;
   return res.json(paginate(items, page, pageSize));
@@ -1985,7 +2070,9 @@ app.patch('/api/tz/:id/approve', async (req, res) => {
 
     tz.updated_at = new Date().toISOString();
     await writeJson(FILES.tz, allTz);
-    return res.json({ message: 'Предложение утверждено.', tz: { ...tz, flags: computeTzFlags(tz) } });
+    const boards = await readJson(FILES.boards, []);
+    const statusOrd = makeBoardOrdCache(boards)(tz.board_id);
+    return res.json({ message: 'Предложение утверждено.', tz: { ...tz, flags: computeTzFlags(tz, statusOrd) } });
   });
 });
 
@@ -2018,7 +2105,15 @@ app.get('/api/tz/:id', async (req, res) => {
   const assignedByName = tz.assigned_by_id ? (users.find(u => u.id === tz.assigned_by_id)?.fullName || null) : null;
   const approvedByName = tz.approved_by ? (users.find(u => u.id === tz.approved_by)?.fullName || null) : null;
 
-  return res.json({ ...tz, flags: computeTzFlags(tz), history, assignee_name: assigneeName, assigned_by_name: assignedByName, approved_by_name: approvedByName });
+  // Resolve linked TZ names for frontend
+  const linkedTzResolved = (tz.linked_tz_ids || []).map((lid) => {
+    const linked = allTz.find((t) => t.id === lid);
+    return linked ? { id: lid, tz_code: linked.tz_code, title: linked.title } : { id: lid, tz_code: lid.slice(0, 8), title: '(удалено)' };
+  });
+
+  const boards = await readJson(FILES.boards, []);
+  const statusOrd = makeBoardOrdCache(boards)(tz.board_id);
+  return res.json({ ...tz, flags: computeTzFlags(tz, statusOrd), history, assignee_name: assigneeName, assigned_by_name: assignedByName, approved_by_name: approvedByName, linked_tz_resolved: linkedTzResolved });
 });
 
 app.post('/api/admin/tz-stats', async (req, res) => {
@@ -2026,9 +2121,15 @@ app.post('/api/admin/tz-stats', async (req, res) => {
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const fBoardId = String(req.body.board_id || '').trim();
+  const boards = await readJson(FILES.boards, []);
   let allTz = await readJson(FILES.tz, []);
   if (fBoardId) allTz = allTz.filter(t => t.board_id === fBoardId);
-  const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz) }));
+  const getOrd = makeBoardOrdCache(boards);
+  const withFlags = allTz.map((tz) => ({ ...tz, flags: computeTzFlags(tz, getOrd(tz.board_id)) }));
+
+  // Use board columns for status breakdown if board filtered
+  const board = fBoardId ? boards.find(b => b.id === fBoardId) : null;
+  const statusKeys = board ? board.columns.map(c => c.id) : TZ_STATUSES;
 
   const stats = {
     total: allTz.length,
@@ -2041,7 +2142,7 @@ app.post('/api/admin/tz-stats', async (req, res) => {
     by_system: {}
   };
 
-  for (const s of TZ_STATUSES) stats.by_status[s] = 0;
+  for (const s of statusKeys) stats.by_status[s] = 0;
   for (const s of TZ_SYSTEMS) stats.by_system[s] = 0;
   for (const tz of allTz) {
     if (stats.by_status[tz.status] !== undefined) stats.by_status[tz.status]++;
@@ -2060,8 +2161,9 @@ app.post('/api/admin/tz-export', async (req, res) => {
 
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
+  const boards = await readJson(FILES.boards, []);
   const usersMap = new Map(users.map(u => [u.id, u.fullName]));
-  const items = filterTz(allTz, req.body, usersMap);
+  const items = filterTz(allTz, req.body, usersMap, boards);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
 
   const prioLabels = { low: 'Низкий', medium: 'Средний', high: 'Высокий', critical: 'Критический' };
@@ -2099,7 +2201,7 @@ app.post('/api/admin/tz-export', async (req, res) => {
       system: tz.system || '',
       type: tz.type || '',
       priority: prioLabels[tz.priority] || tz.priority || '',
-      status: TZ_STATUS_LABELS[tz.status] || tz.status || '',
+      status: getBoardStatusLabels(boards, tz.board_id)[tz.status] || tz.status || '',
       owner: tz.owner || '',
       description: tz.description || '',
       completion_notes: tz.completion_notes || '',
@@ -2158,8 +2260,11 @@ app.post('/api/admin/tz-import', (req, res) => {
 
       if (!rows.length) return res.status(400).json({ message: 'Нет данных для импорта в файле.' });
 
-      // Build AI prompt
-      const statusMap = Object.entries(TZ_STATUS_LABELS).map(([k, v]) => `${v} → ${k}`).join(', ');
+      // Build AI prompt — collect all status labels from all boards + global
+      const boards = await readJson(FILES.boards, []);
+      const allLabels = { ...TZ_STATUS_LABELS };
+      for (const b of boards) for (const c of b.columns) allLabels[c.id] = c.name;
+      const statusMap = Object.entries(allLabels).map(([k, v]) => `${v} → ${k}`).join(', ');
       const prompt = `Ты — автоматический импортёр ТЗ. Тебе дан список строк из Excel-файла (поля: tz_code, status, completion_notes).
 
 Задача: прочитай файл data/tz.json, найди записи по tz_code и обнови поля status и completion_notes.
@@ -2269,7 +2374,7 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
   const usersMap = new Map(users.map(u => [u.id, u.fullName]));
-  const items = filterTz(allTz, req.body, usersMap);
+  const items = filterTz(allTz, req.body, usersMap, boards);
 
   items.sort((a, b) => {
     const pa = { critical: 0, high: 1, medium: 2, low: 3 };
@@ -2374,7 +2479,8 @@ app.patch('/api/tz/:id/status', async (req, res) => {
     const newLabel = statusLabelsLocal[newStatus] || newStatus;
     notifyTzWatchers(tz, `Статус: ${oldLabel} → <b>${escHtml(newLabel)}</b>\nИзменил: ${escHtml(changedBy)}`, authUser.id);
 
-    return res.json({ message: `Статус изменён на «${statusLabelsLocal[newStatus] || newStatus}».`, tz: { ...tz, flags: computeTzFlags(tz) } });
+    const statusOrd = board ? buildStatusOrd(board.columns) : TZ_STATUS_ORD;
+    return res.json({ message: `Статус изменён на «${statusLabelsLocal[newStatus] || newStatus}».`, tz: { ...tz, flags: computeTzFlags(tz, statusOrd) } });
   });
 });
 
