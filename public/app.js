@@ -439,6 +439,7 @@ loginForm.addEventListener('submit', async (e) => {
     showMain();
     await loadApp();
     showTzNotifications();
+    startBookingReminders();
     showOnboarding();
     await restoreFromHash();
   } catch (err) {
@@ -608,7 +609,9 @@ function renderSchedule() {
     const bk = state.bookings.find((b) => b.startHour <= t && b.endHour > t);
     const isCurrent = isToday && nowHour >= t && nowHour < t + step;
     const isPast = isToday && nowHour >= t + step;
+    const progressPct = isCurrent ? Math.round(((nowHour - t) / step) * 100) : 0;
     const rowClass = `slot-row${isCurrent ? ' slot-now' : ''}${isPast ? ' slot-past' : ''}`;
+    const progressBar = isCurrent ? `<div class="slot-progress" style="width:${progressPct}%"></div>` : '';
     if (bk) {
       const isFirst = bk.startHour === t;
       const span = isFirst ? `${fmtTime(bk.startHour)}–${fmtTime(bk.endHour)}` : '';
@@ -618,6 +621,7 @@ function renderSchedule() {
       html += `<div class="${rowClass}">
         <div class="slot-time">${label}</div>
         <div class="slot-status busy">
+          ${progressBar}
           ${esc(bk.topic)}${cancelBtn}
           <span class="slot-info">
             <a href="#" class="slot-profile-link" data-pin="${esc(bk.pin)}">${esc(bk.fullName)}</a>
@@ -628,7 +632,7 @@ function renderSchedule() {
     } else {
       html += `<div class="${rowClass}">
         <div class="slot-time">${label}</div>
-        <div class="slot-status free clickable" data-hour="${t}">Свободно</div>
+        <div class="slot-status free${isPast ? '' : ' clickable'}" ${isPast ? '' : `data-hour="${t}"`}>${isPast ? '—' : 'Свободно'}</div>
       </div>`;
     }
   }
@@ -646,6 +650,10 @@ function renderSchedule() {
   // Auto-scroll to current time slot
   const nowSlot = scheduleGrid.querySelector('.slot-now');
   if (nowSlot) nowSlot.scrollIntoView({ behavior: 'smooth', block: 'center' });
+
+  // Auto-refresh every 60s to keep "now" indicator current
+  clearTimeout(renderSchedule._timer);
+  if (isToday) renderSchedule._timer = setTimeout(() => renderSchedule(), 60000);
 }
 
 /* ── Booking popup ── */
@@ -1841,6 +1849,63 @@ async function showTzNotifications() {
   if (parts.length > 0) {
     showToast(`\u26A0 Внимание: ${parts.join(', ')}`, stats.overdue > 0 ? 'danger' : 'warn');
   }
+}
+
+/* ── Booking reminders (browser notifications + banner) ── */
+
+const _reminderSent = new Set();
+let _reminderTimer = null;
+
+async function checkBookingReminders() {
+  if (!state.pin) return;
+  try {
+    const myBookings = await api(`/api/bookings/my-today?pin=${encodeURIComponent(state.pin)}`);
+    const now = new Date();
+    const nowHour = now.getHours() + now.getMinutes() / 60;
+    const banner = document.getElementById('bookingReminder');
+    let bannerHtml = '';
+
+    for (const bk of myBookings) {
+      const minsUntil = Math.round((bk.startHour - nowHour) * 60);
+      if (minsUntil > 0 && minsUntil <= 15) {
+        const key = bk.id;
+        const timeStr = `${fmtTime(bk.startHour)}–${fmtTime(bk.endHour)}`;
+        bannerHtml += `<span class="reminder-icon">⏰</span> Встреча через ${minsUntil} мин — <b>${esc(bk.roomName)}</b>, ${timeStr}: ${esc(bk.topic)} ` +
+          `<button class="reminder-dismiss" onclick="this.closest('.booking-reminder').classList.add('hidden')" title="Скрыть">✕</button>`;
+
+        // Browser notification (once per booking)
+        if (!_reminderSent.has(key)) {
+          _reminderSent.add(key);
+          if (Notification.permission === 'granted') {
+            new Notification('Встреча скоро', {
+              body: `Через ${minsUntil} мин — ${bk.roomName}, ${timeStr}\n${bk.topic}`,
+              icon: '/favicon.ico',
+              tag: `booking-${bk.id}`
+            });
+          }
+        }
+      }
+    }
+
+    if (banner) {
+      if (bannerHtml) {
+        banner.innerHTML = bannerHtml;
+        banner.classList.remove('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+  } catch { /* ignore */ }
+}
+
+function startBookingReminders() {
+  // Request notification permission
+  if ('Notification' in window && Notification.permission === 'default') {
+    Notification.requestPermission();
+  }
+  checkBookingReminders();
+  clearInterval(_reminderTimer);
+  _reminderTimer = setInterval(checkBookingReminders, 60000);
 }
 
 /* ── TZ (Технические задания) ── */
@@ -4397,7 +4462,7 @@ if (itStatusMatch) {
   (async () => {
     const loggedIn = await tryAutoLogin();
     if (loggedIn) {
-      showMain(); await loadApp(); showTzNotifications();
+      showMain(); await loadApp(); showTzNotifications(); startBookingReminders();
       initGlobalSearch();
       await restoreFromHash();
     }

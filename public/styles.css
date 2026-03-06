@@ -131,6 +131,22 @@ details[open] summary{margin-bottom:12px}
 .topbar h1{margin:0;font-size:18px;font-weight:700;letter-spacing:1px}
 .topbar .subtitle{margin:2px 0 0;color:rgba(255,255,255,.7);font-size:13px}
 
+.booking-reminder{
+  background:linear-gradient(90deg,#fff7ed,#ffedd5);
+  color:#9a3412;padding:10px 24px;font-size:13px;font-weight:600;
+  display:flex;align-items:center;gap:10px;
+  border-bottom:1px solid #fed7aa;
+  animation:reminderSlide .3s ease-out;
+}
+.booking-reminder.hidden{display:none}
+.booking-reminder .reminder-icon{font-size:18px;flex-shrink:0}
+.booking-reminder .reminder-dismiss{
+  margin-left:auto;background:none;border:none;color:#9a3412;
+  cursor:pointer;font-size:16px;opacity:.6;padding:2px 6px;
+}
+.booking-reminder .reminder-dismiss:hover{opacity:1}
+@keyframes reminderSlide{from{transform:translateY(-100%);opacity:0}to{transform:translateY(0);opacity:1}}
+
 .topbar-user{
   display:flex;align-items:center;gap:10px;cursor:pointer;
   padding:4px 8px;border-radius:10px;transition:background .2s;
@@ -326,12 +342,28 @@ button{
 
 .slot-now{position:relative}
 .slot-now::before{
-  content:'';position:absolute;left:0;right:0;top:-1px;
-  height:2px;background:var(--accent);border-radius:2px;z-index:1;
+  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
+  background:var(--accent);border-radius:3px;z-index:1;
 }
-.slot-now .slot-time{color:var(--accent);font-weight:800}
-.slot-now .slot-status{box-shadow:0 0 0 2px var(--accent)}
-.slot-past{opacity:.5}
+.slot-now .slot-time{color:var(--accent);font-weight:800;position:relative}
+.slot-now .slot-time::after{
+  content:'◀ сейчас';font-size:10px;font-weight:600;color:var(--accent);
+  margin-left:6px;letter-spacing:.3px;text-transform:uppercase;
+  animation:slotPulse 2s ease-in-out infinite;
+}
+@keyframes slotPulse{0%,100%{opacity:1}50%{opacity:.4}}
+.slot-now .slot-status{
+  box-shadow:0 0 0 2px var(--accent);
+  background:color-mix(in srgb,var(--accent) 6%,var(--bg));
+}
+.slot-progress{
+  position:absolute;left:0;top:0;bottom:0;
+  background:color-mix(in srgb,var(--accent) 10%,transparent);
+  border-radius:10px 0 0 10px;pointer-events:none;transition:width 1s linear;
+}
+.slot-now .slot-status{position:relative;overflow:hidden}
+.slot-past{opacity:.45;filter:grayscale(.15)}
+.slot-past .slot-status.free{background:var(--bg);border-color:var(--border);color:var(--text-sec)}
 .slot-time{font-size:13px;font-weight:700;color:var(--text-sec);white-space:nowrap}
 
 .slot-status{

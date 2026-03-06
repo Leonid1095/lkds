@@ -10,6 +10,9 @@ const rootDir = path.resolve(__dirname, '..');
 const TASKS_FILE = path.join(rootDir, 'data', 'ai-tasks.json');
 const TZ_FILE = path.join(rootDir, 'data', 'tz.json');
 const BOARDS_FILE = path.join(rootDir, 'data', 'boards.json');
+const BOOKINGS_FILE = path.join(rootDir, 'data', 'bookings.json');
+const ROOMS_FILE = path.join(rootDir, 'data', 'rooms.json');
+const USERS_FILE = path.join(rootDir, 'data', 'users.json');
 const CLAUDE_BIN = '/home/plg/.nvm/versions/node/v20.19.4/bin/claude';
 const POLL_INTERVAL = 5000;
 const TASK_TIMEOUT = 300000;
@@ -221,11 +224,60 @@ async function poll() {
   }
 }
 
+/* ── Booking reminders (15 min before) ── */
+
+const _sentReminders = new Set();
+
+async function checkBookingReminders() {
+  let bookings, rooms, users;
+  try {
+    bookings = JSON.parse(await fs.readFile(BOOKINGS_FILE, 'utf8'));
+    rooms = JSON.parse(await fs.readFile(ROOMS_FILE, 'utf8'));
+    users = JSON.parse(await fs.readFile(USERS_FILE, 'utf8'));
+  } catch { return; }
+
+  const now = new Date();
+  const today = now.toISOString().slice(0, 10);
+  const nowHour = now.getHours() + now.getMinutes() / 60;
+  const fmtH = (v) => { const h = Math.floor(v); const m = v % 1 ? '30' : '00'; return `${String(h).padStart(2,'0')}:${m}`; };
+
+  for (const bk of bookings) {
+    if (bk.date !== today) continue;
+    const key = `${bk.id}_${bk.date}`;
+    if (_sentReminders.has(key)) continue;
+
+    const minsUntil = (bk.startHour - nowHour) * 60;
+    if (minsUntil > 0 && minsUntil <= 15) {
+      _sentReminders.add(key);
+      const roomName = rooms.find(r => r.id === bk.roomId)?.name || bk.roomId;
+      const msg =
+        `⏰ <b>Напоминание: встреча через ${Math.round(minsUntil)} мин</b>\n` +
+        `Комната: ${escHtml(roomName)}\n` +
+        `Время: ${fmtH(bk.startHour)}–${fmtH(bk.endHour)}\n` +
+        `Тема: ${escHtml(bk.topic)}\n` +
+        `Участник: ${escHtml(bk.fullName)}`;
+
+      // Send to booking creator if they have tgChatId
+      const user = users.find(u => u.id === bk.userId);
+      if (user?.tgChatId) {
+        await sendTelegram(user.tgChatId, msg);
+        log(`[reminder] sent to user for booking ${bk.id} (${roomName}, ${fmtH(bk.startHour)})`);
+      } else {
+        log(`[reminder] user ${bk.fullName} has no tgChatId, skipping booking ${bk.id}`);
+      }
+    }
+  }
+
+  // Cleanup old reminder keys daily
+  if (_sentReminders.size > 200) _sentReminders.clear();
+}
+
 async function tick() {
   await poll();
   if (shouldRunDigest()) {
     try { await sendTzDigest(); } catch (err) { log(`[digest] error: ${err.message}`); }
   }
+  try { await checkBookingReminders(); } catch (err) { log(`[reminder] error: ${err.message}`); }
 }
 
 log('AI Worker started');

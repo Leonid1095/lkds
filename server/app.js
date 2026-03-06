@@ -699,7 +699,8 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
     fullName: user.fullName, contact: user.contact,
     position: user.position || '', userId: user.id,
     avatar: user.avatar || '', admin: !!adminRole, adminRole: adminRole || null,
-    workLocation: user.workLocation || '', workDesk: user.workDesk || ''
+    workLocation: user.workLocation || '', workDesk: user.workDesk || '',
+    tgChatId: user.tgChatId || ''
   });
 });
 
@@ -780,6 +781,7 @@ app.post('/api/profile/update', async (req, res) => {
   const position = clip(String(req.body.position || '').trim(), 100);
   const workLocation = req.body.workLocation !== undefined ? clip(String(req.body.workLocation || '').trim(), 100) : undefined;
   const workDesk = req.body.workDesk !== undefined ? clip(String(req.body.workDesk || '').trim(), 10) : undefined;
+  const tgChatId = req.body.tgChatId !== undefined ? clip(String(req.body.tgChatId || '').trim(), 20) : undefined;
 
   const userObj = await getUserByPin(pin);
   if (!userObj) return res.status(401).json({ message: 'Неверный пин-код.' });
@@ -793,13 +795,15 @@ app.post('/api/profile/update', async (req, res) => {
     if (position !== undefined) u.position = position;
     if (workLocation !== undefined) u.workLocation = workLocation;
     if (workDesk !== undefined) u.workDesk = workDesk;
+    if (tgChatId !== undefined) u.tgChatId = tgChatId;
 
     await writeJson(FILES.users, users);
     invalidatePinCache(pin);
     return res.json({
       message: 'Профиль обновлён.', contact: u.contact,
       position: u.position || '',
-      workLocation: u.workLocation || '', workDesk: u.workDesk || ''
+      workLocation: u.workLocation || '', workDesk: u.workDesk || '',
+      tgChatId: u.tgChatId || ''
     });
   });
 });
@@ -852,6 +856,24 @@ app.get('/api/avatars/:filename', async (req, res) => {
 });
 
 /* ── Bookings ── */
+
+app.get('/api/bookings/my-today', async (req, res) => {
+  const pin = String(req.query.pin || '').trim();
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
+
+  const today = new Date().toISOString().slice(0, 10);
+  const bookings = await readJson(FILES.bookings, []);
+  const rooms = await readJson(FILES.rooms, []);
+  const roomMap = Object.fromEntries(rooms.map(r => [r.id, r.name]));
+
+  const my = bookings
+    .filter(b => b.date === today && (b.userId === user.id || b.fullName === user.fullName))
+    .map(b => ({ ...b, roomName: roomMap[b.roomId] || b.roomId }))
+    .sort((a, b) => a.startHour - b.startHour);
+
+  return res.json(my);
+});
 
 app.get('/api/bookings', async (req, res) => {
   const roomId = String(req.query.roomId || '').trim();
