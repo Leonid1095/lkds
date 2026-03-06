@@ -393,7 +393,8 @@ function showMain() {
   } else {
     hide(adminBtn);
   }
-  tabTz.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+  const hasTzAccess = state.adminRole === 'superadmin' || (state.tzBoards || []).some(b => b.access === 'all' || (b.access === 'admins' && state.isAdmin));
+  tabTz.style.display = (state.pin && hasTzAccess) ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabKb.style.display = state.pin ? '' : 'none';
   if (metricsContent) {
@@ -1774,6 +1775,34 @@ function getCurrentBoard() {
   return state.tzBoards.find(b => b.id === state.tzBoardId) || state.tzBoards.find(b => b.is_default) || null;
 }
 
+/** Get card_fields config for given board (defaults: all true for legacy) */
+function getBoardCardFields(board) {
+  const def = { system: true, link_confluence: true, link_jira: true, phase_deadlines: true, completion_notes: true, approval: true };
+  return board?.card_fields ? { ...def, ...board.card_fields } : def;
+}
+
+/** Show/hide form fields based on board card_fields config */
+function applyBoardCardFields(board) {
+  const cf = getBoardCardFields(board);
+  const systemRow = $('tzSystem').closest('label');
+  const confRow = $('tzLinkConfluence').closest('label');
+  const jiraRow = $('tzLinkJira').closest('label');
+  const analysisRow = $('tzDateAnalysis').closest('label');
+  const devRow = $('tzDateDev').closest('label');
+  const releaseRow = $('tzDateRelease').closest('label');
+  const notesRow = $('tzCompletionNotesRow');
+
+  if (!cf.system) { systemRow.style.display = 'none'; $('tzSystem').value = 'OTHER'; }
+  if (!cf.link_confluence && confRow) confRow.style.display = 'none';
+  if (!cf.link_jira && jiraRow) jiraRow.style.display = 'none';
+  if (!cf.phase_deadlines) {
+    if (analysisRow) analysisRow.style.display = 'none';
+    if (devRow) devRow.style.display = 'none';
+    if (releaseRow) releaseRow.style.display = 'none';
+  }
+  if (!cf.completion_notes && notesRow) notesRow.style.display = 'none';
+}
+
 function getBoardStatusLabel(status) {
   const board = getCurrentBoard();
   if (board) {
@@ -1833,11 +1862,17 @@ function renderTzFilters() {
   const prioOpts = ['<option value="">Все приоритеты</option>']
     .concat(cfg.priorities.map((p) => `<option value="${esc(p)}"${f.priority === p ? ' selected' : ''}>${esc(TZ_PRIO_LABELS[p] || p)}</option>`)).join('');
 
-  // Board tabs
+  // Board tabs (filter by access)
+  const visibleBoards = state.tzBoards.filter(b => {
+    if (isSA) return true;
+    if (b.access === 'all') return true;
+    if (b.access === 'admins' && state.isAdmin) return true;
+    return false;
+  });
   let boardTabsHtml = '';
-  if (state.tzBoards.length > 0) {
+  if (visibleBoards.length > 0) {
     boardTabsHtml = '<div class="tz-board-tabs">';
-    for (const b of state.tzBoards) {
+    for (const b of visibleBoards) {
       const active = b.id === state.tzBoardId ? ' active' : '';
       boardTabsHtml += `<button type="button" class="tz-board-tab${active}" data-board-id="${esc(b.id)}" aria-label="Доска: ${esc(b.name)}">${esc(b.name)}</button>`;
     }
@@ -1848,17 +1883,18 @@ function renderTzFilters() {
     boardTabsHtml += '</div>';
   }
 
+  const curBoardCf = getBoardCardFields(getCurrentBoard());
   tzFilters.innerHTML = `${boardTabsHtml}
     <div class="tz-filters-row">
-      <select class="tz-filter-select" id="tzFilterSystem">${systemOpts}</select>
+      ${curBoardCf.system ? `<select class="tz-filter-select" id="tzFilterSystem">${systemOpts}</select>` : ''}
       <select class="tz-filter-select" id="tzFilterStatus">${statusOpts}</select>
       <select class="tz-filter-select" id="tzFilterType">${typeOpts}</select>
       <select class="tz-filter-select" id="tzFilterPriority">${prioOpts}</select>
       <input class="tz-filter-search" id="tzFilterSearch" placeholder="Поиск..." value="${esc(f.search)}" />
       <div class="tz-filter-actions">
-        <button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
+        ${isSA ? `<button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
         <button class="tz-export-btn" id="tzImportBtn" type="button">&#x1F4E4; Импорт</button>
-        <input type="file" id="tzImportFile" accept=".xlsx" style="display:none" />
+        <input type="file" id="tzImportFile" accept=".xlsx" style="display:none" />` : ''}
         <button class="tz-create-btn" id="tzCreateBtn" type="button">+ Создать</button>
         <div class="tz-view-toggle">
         <button type="button" class="tz-view-btn${state.tzViewMode === 'list' ? ' active' : ''}" data-view="list" title="Список">
@@ -2140,7 +2176,13 @@ function initTzBulk() {
 }
 
 async function loadTzData() {
-  if (!state.pin || state.adminRole !== 'superadmin') return;
+  if (!state.pin) return;
+  const curBoard = getCurrentBoard();
+  const boardAccess = curBoard?.access || 'superadmin';
+  const canAccess = state.adminRole === 'superadmin'
+    || boardAccess === 'all'
+    || (boardAccess === 'admins' && state.isAdmin);
+  if (!canAccess) return;
   msg(tzMessage, '');
   const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
   try {
@@ -2242,6 +2284,9 @@ function openTzCreateForm(presetType) {
   }
   show(tzStatusRow);
   hide($('tzCompletionNotesRow'));
+
+  // Apply board card_fields visibility
+  applyBoardCardFields(board);
 
   // Bind type change to toggle fields
   $('tzType').onchange = () => {
@@ -2358,9 +2403,13 @@ async function openTzDetail(id) {
     show(tzStatusRow);
     show($('tzCompletionNotesRow'));
 
+    // Apply board card_fields visibility
+    applyBoardCardFields(detailBoard);
+
     // Approval info for Предложение
     const approveRow = $('tzApproveRow');
-    if (data.type === 'Предложение') {
+    const cfDetail = getBoardCardFields(detailBoard);
+    if (data.type === 'Предложение' && cfDetail.approval) {
       if (!approveRow) {
         // Create approve row dynamically
         const row = document.createElement('div');
@@ -3053,6 +3102,26 @@ function openBoardSettingsModal() {
         <input id="bsNewColColor" type="color" value="#edf2f7" />
         <button type="button" class="btn-primary btn-sm" id="bsAddCol">+</button>
       </div>
+      <h4 style="margin:16px 0 8px">Доступ</h4>
+      <label><select id="bsAccess" class="tz-filter-select" style="width:100%">
+        <option value="superadmin"${(board.access || 'superadmin') === 'superadmin' ? ' selected' : ''}>Только суперадмин</option>
+        <option value="admins"${board.access === 'admins' ? ' selected' : ''}>Админы</option>
+        <option value="all"${board.access === 'all' ? ' selected' : ''}>Все сотрудники</option>
+      </select></label>
+      <h4 style="margin:16px 0 8px">Поля карточки</h4>
+      <div class="board-card-fields" style="display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px">
+        ${[
+          ['system', 'Система'],
+          ['link_confluence', 'Ссылка Confluence'],
+          ['link_jira', 'Ссылка Jira'],
+          ['phase_deadlines', 'Фазовые дедлайны'],
+          ['completion_notes', 'Примечания к выполнению'],
+          ['approval', 'Утверждение предложений']
+        ].map(([k, label]) => {
+          const checked = (board.card_fields || {})[k] ? ' checked' : '';
+          return '<label style="cursor:pointer"><input type="checkbox" class="bs-cf-toggle" data-cf-key="' + k + '"' + checked + ' /> ' + esc(label) + '</label>';
+        }).join('')}
+      </div>
     </div>`;
   }
 
@@ -3076,7 +3145,11 @@ function openBoardSettingsModal() {
             pin: state.pin,
             name: document.getElementById('bsName').value.trim(),
             code_prefix: document.getElementById('bsPrefix').value.trim(),
-            description: document.getElementById('bsDesc').value.trim()
+            description: document.getElementById('bsDesc').value.trim(),
+            access: document.getElementById('bsAccess').value,
+            card_fields: Object.fromEntries(
+              [...document.querySelectorAll('.bs-cf-toggle')].map(cb => [cb.dataset.cfKey, cb.checked])
+            )
           })
         });
         Object.assign(board, result.board);

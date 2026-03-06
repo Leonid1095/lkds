@@ -493,6 +493,25 @@ async function migrateBoards() {
     console.log(`[migrate] boards.json created with default board ${defaultId}`);
   }
 
+  // Migrate: add card_fields and access to existing boards
+  let boardsMigrated = false;
+  for (const b of boards) {
+    if (!b.card_fields) {
+      b.card_fields = b.is_default
+        ? { system: true, link_confluence: true, link_jira: true, phase_deadlines: true, completion_notes: true, approval: true }
+        : { system: false, link_confluence: false, link_jira: false, phase_deadlines: false, completion_notes: false, approval: false };
+      boardsMigrated = true;
+    }
+    if (!b.access) {
+      b.access = b.is_default ? 'superadmin' : 'all';
+      boardsMigrated = true;
+    }
+  }
+  if (boardsMigrated) {
+    await writeJson(FILES.boards, boards);
+    console.log('[migrate] added card_fields/access to boards');
+  }
+
   // Assign board_id to all TZ records without one
   const defaultBoard = boards.find(b => b.is_default);
   if (defaultBoard) {
@@ -1191,6 +1210,17 @@ async function requireAdmin(pin) {
   return user;
 }
 
+/** Check board access: 'all' = any authed user, 'admins' = admin+, 'superadmin' = superadmin only */
+async function requireBoardAccess(pin, board) {
+  const access = board?.access || 'superadmin';
+  if (access === 'all') {
+    const user = await getUserByPin(pin);
+    return user || null;
+  }
+  if (access === 'admins') return requireAdmin(pin);
+  return requireSuperAdmin(pin);
+}
+
 function paginate(items, page, pageSize) {
   const total = items.length;
   const p = Math.max(1, Number(page) || 1);
@@ -1526,6 +1556,8 @@ app.post('/api/boards', async (req, res) => {
       default_column: 'todo',
       systems: [],
       types: ['Задача'],
+      card_fields: { system: false, link_confluence: false, link_jira: false, phase_deadlines: false, completion_notes: false, approval: false },
+      access: 'all',
       is_default: false,
       created_at: now,
       updated_at: now
@@ -1554,6 +1586,18 @@ app.put('/api/boards/:id', async (req, res) => {
     }
     if (Array.isArray(req.body.systems)) board.systems = req.body.systems.map(s => String(s).trim()).filter(Boolean);
     if (Array.isArray(req.body.types)) board.types = req.body.types.map(s => String(s).trim()).filter(Boolean);
+    if (req.body.card_fields && typeof req.body.card_fields === 'object') {
+      const validKeys = ['system', 'link_confluence', 'link_jira', 'phase_deadlines', 'completion_notes', 'approval'];
+      const cf = board.card_fields || {};
+      for (const k of validKeys) {
+        if (req.body.card_fields[k] !== undefined) cf[k] = !!req.body.card_fields[k];
+      }
+      board.card_fields = cf;
+    }
+    if (req.body.access !== undefined) {
+      const validAccess = ['all', 'admins', 'superadmin'];
+      if (validAccess.includes(req.body.access)) board.access = req.body.access;
+    }
     board.updated_at = new Date().toISOString();
 
     await writeJson(FILES.boards, boards);
@@ -2052,11 +2096,13 @@ function filterTz(allTz, body, usersMap, boards) {
 
 app.post('/api/admin/tz', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const boards = await readJson(FILES.boards, []);
+  const fBoardId = String(req.body.board_id || '').trim();
+  const board = fBoardId ? boards.find(b => b.id === fBoardId) : boards.find(b => b.is_default);
+  if (!(await requireBoardAccess(pin, board))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
-  const boards = await readJson(FILES.boards, []);
   const usersMap = new Map(users.map(u => [u.id, u.fullName]));
   const items = filterTz(allTz, req.body, usersMap, boards);
   items.sort((a, b) => b.created_at.localeCompare(a.created_at));
@@ -2141,10 +2187,10 @@ app.get('/api/tz/:id', async (req, res) => {
 
 app.post('/api/admin/tz-stats', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-
   const fBoardId = String(req.body.board_id || '').trim();
   const boards = await readJson(FILES.boards, []);
+  const board0 = fBoardId ? boards.find(b => b.id === fBoardId) : boards.find(b => b.is_default);
+  if (!(await requireBoardAccess(pin, board0))) return res.status(403).json({ message: 'Нет доступа.' });
   let allTz = await readJson(FILES.tz, []);
   if (fBoardId) allTz = allTz.filter(t => t.board_id === fBoardId);
   const getOrd = makeBoardOrdCache(boards);
@@ -2383,16 +2429,16 @@ app.post('/api/admin/tz-bulk', async (req, res) => {
   });
 });
 
-/* ── Kanban view (superadmin only) ── */
+/* ── Kanban view ── */
 
 app.post('/api/admin/tz-kanban', async (req, res) => {
   const pin = String(req.body.pin || '').trim();
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   // Resolve board for columns
   const fBoardId = String(req.body.board_id || '').trim();
   const boards = await readJson(FILES.boards, []);
   const board = fBoardId ? boards.find(b => b.id === fBoardId) : boards.find(b => b.is_default);
+  if (!(await requireBoardAccess(pin, board))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
