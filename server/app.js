@@ -432,6 +432,11 @@ async function verifyPin(pin, hash, salt) {
 }
 
 // Simple in-memory cache: pin → {user, expires}
+/** Extract PIN from request: header > body > query (migrating away from query) */
+function getPin(req) {
+  return String(req.get('x-auth-pin') || req.body?.pin || req.query?.pin || '').trim();
+}
+
 const _pinCache = new Map();
 const PIN_CACHE_TTL = 5 * 60 * 1000;
 
@@ -762,7 +767,7 @@ app.get('/api/links', async (_req, res) => {
 /* ── Profile ── */
 
 app.get('/api/profile/:pin', async (req, res) => {
-  const reqPin = String(req.query.requester || '').trim();
+  const reqPin = String(req.get('x-auth-pin') || req.query.requester || '').trim();
   if (!/^\d{4}$/.test(reqPin))
     return res.status(401).json({ message: 'Нужна авторизация.' });
 
@@ -864,7 +869,7 @@ app.get('/api/avatars/:filename', async (req, res) => {
 /* ── Bookings ── */
 
 app.get('/api/bookings/my-today', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   const user = await getUserByPin(pin);
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
 
@@ -2077,22 +2082,23 @@ app.put('/api/tz/:id', async (req, res) => {
     if (req.body.priority !== undefined && !TZ_PRIORITIES.includes(req.body.priority))
       return res.status(400).json({ message: 'Выберите приоритет.' });
 
+    const warnings = [];
     for (const field of editableFields) {
       if (req.body[field] === undefined) continue;
       let newVal = typeof req.body[field] === 'string' ? req.body[field].trim() : req.body[field];
       if (field === 'title') newVal = clip(newVal, 300);
       if (field === 'description') newVal = clip(newVal, 5000);
       if (field === 'owner') newVal = clip(newVal, 100);
-      if (field === 'link_confluence') { newVal = clip(newVal, 500); if (newVal && !/^https?:\/\//i.test(newVal)) continue; }
-      if (field === 'link_jira') { newVal = clip(newVal, 500); if (newVal && !/^https?:\/\//i.test(newVal)) continue; }
+      if (field === 'link_confluence') { newVal = clip(newVal, 500); if (newVal && !/^https?:\/\//i.test(newVal)) { warnings.push(`link_confluence: невалидный URL`); continue; } }
+      if (field === 'link_jira') { newVal = clip(newVal, 500); if (newVal && !/^https?:\/\//i.test(newVal)) { warnings.push(`link_jira: невалидный URL`); continue; } }
       if (field === 'completion_notes') newVal = clip(newVal, 5000);
       if (['date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline', 'deadline'].includes(field)) {
-        if (newVal && !isValidDate(newVal)) continue;
+        if (newVal && !isValidDate(newVal)) { warnings.push(`${field}: невалидная дата`); continue; }
         newVal = newVal || null;
       }
       if (field === 'assignee_id') {
         newVal = newVal || null;
-        if (newVal && !UUID_RE.test(newVal)) continue;
+        if (newVal && !UUID_RE.test(newVal)) { warnings.push(`assignee_id: невалидный UUID`); continue; }
         // Track who assigned
         if (newVal && newVal !== (tz.assignee_id || null)) {
           tz.assigned_by_id = authUser.id;
@@ -2146,7 +2152,9 @@ app.put('/api/tz/:id', async (req, res) => {
     tz.updated_at = new Date().toISOString();
     await writeJson(FILES.tz, allTz);
 
-    return res.json({ message: 'ТЗ обновлено.', tz });
+    const resp = { message: 'ТЗ обновлено.', tz };
+    if (warnings.length) resp.warnings = warnings;
+    return res.json(resp);
   });
 });
 
@@ -2716,7 +2724,7 @@ async function notifyTzWatchers(tz, changeText, excludeUserId) {
 /* ── TZ Comments ── */
 
 app.get('/api/tz/:id/comments', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   const user = await getUserByPin(pin);
   if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
   const role = getUserRole(pin, user);
@@ -2807,7 +2815,7 @@ const KB_FILES = {
 // Categories
 
 app.get('/api/kb/categories', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
 
   const cats = await readJson(KB_FILES.categories, []);
@@ -2865,7 +2873,7 @@ app.put('/api/kb/categories/:id', async (req, res) => {
 });
 
 app.delete('/api/kb/categories/:id', async (req, res) => {
-  const pin = String(req.body.pin || req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const id = req.params.id;
@@ -2886,7 +2894,7 @@ app.delete('/api/kb/categories/:id', async (req, res) => {
 // Articles
 
 app.get('/api/kb/articles', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
 
   const articles = await readJson(KB_FILES.articles, []);
@@ -2910,7 +2918,7 @@ app.get('/api/kb/articles', async (req, res) => {
 });
 
 app.get('/api/kb/articles/:id', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
 
   const articles = await readJson(KB_FILES.articles, []);
@@ -2989,7 +2997,7 @@ app.put('/api/kb/articles/:id', async (req, res) => {
 });
 
 app.delete('/api/kb/articles/:id', async (req, res) => {
-  const pin = String(req.body.pin || req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const id = req.params.id;
@@ -3095,7 +3103,7 @@ app.post('/api/admin/ai-task-cancel', async (req, res) => {
 /* ── TZ Templates (superadmin) ── */
 
 app.get('/api/tz-templates', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   const templates = await readJson(FILES.tzTemplates, []);
   return res.json(templates);
@@ -3167,7 +3175,7 @@ app.delete('/api/tz-templates/:id', async (req, res) => {
 /* ── Global Search ── */
 
 app.get('/api/search', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   const user = await getUserByPin(pin);
   if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
   const q = String(req.query.q || '').trim().toLowerCase();
@@ -3201,7 +3209,7 @@ app.get('/api/search', async (req, res) => {
 /* ── Team Directory ── */
 
 app.get('/api/team/members', async (req, res) => {
-  const pin = String(req.query.pin || '').trim();
+  const pin = getPin(req);
   if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
   const users = await readJson(FILES.users, []);
   const members = users.map((u) => ({

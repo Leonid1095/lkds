@@ -246,6 +246,9 @@ function esc(str) {
 }
 
 async function api(url, opts = {}) {
+  if (state.pin) {
+    opts.headers = { ...opts.headers, 'X-Auth-Pin': state.pin };
+  }
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Ошибка запроса');
@@ -254,6 +257,7 @@ async function api(url, opts = {}) {
 
 function show(el) { el.classList.remove('hidden'); }
 function hide(el) { el.classList.add('hidden'); }
+function debounce(fn, ms) { let t; return (...a) => { clearTimeout(t); t = setTimeout(() => fn(...a), ms); }; }
 function pad(n) { return String(n).padStart(2, '0'); }
 function fmtTime(t) { const h = Math.floor(t); const m = (t % 1) ? '30' : '00'; return `${pad(h)}:${m}`; }
 
@@ -342,7 +346,7 @@ async function restoreFromHash() {
     switchToTab('kb', false);
     // Load categories to resolve slug → id
     try {
-      const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+      const cats = await api(`/api/kb/categories`);
       state.kbCategories = cats;
       const cat = cats.find((c) => toSlug(c.name) === h.kbCatSlug);
       if (cat && h.kbArticleSlug) {
@@ -849,7 +853,7 @@ async function openProfile(pin) {
   msg(profileMessage, '');
 
   try {
-    const data = await api(`/api/profile/${pin}?requester=${encodeURIComponent(state.pin)}`);
+    const data = await api(`/api/profile/${pin}`);
 
     profileTitle.textContent = isOwn ? 'Мой профиль' : 'Профиль';
     profileName.textContent = data.fullName;
@@ -1880,7 +1884,7 @@ let _reminderTimer = null;
 async function checkBookingReminders() {
   if (!state.pin) return;
   try {
-    const myBookings = await api(`/api/bookings/my-today?pin=${encodeURIComponent(state.pin)}`);
+    const myBookings = await api(`/api/bookings/my-today`);
     const now = new Date();
     const nowHour = now.getHours() + now.getMinutes() / 60;
     const banner = document.getElementById('bookingReminder');
@@ -2528,7 +2532,7 @@ function populateAssigneeSelect(selectedId) {
 async function openTzDetail(id) {
   msg(tzPopupMessage, '');
   try {
-    const data = await api(`/api/tz/${id}?pin=${encodeURIComponent(state.pin)}`);
+    const data = await api(`/api/tz/${id}`);
     state.tzEditId = id;
     const cfg = state.tzConfig;
     const isSA = state.adminRole === 'superadmin';
@@ -2718,7 +2722,7 @@ function renderTzHistory(history) {
 async function renderTzComments(tzId) {
   if (!tzCommentsSection) return;
   try {
-    const comments = await api(`/api/tz/${tzId}/comments?pin=${encodeURIComponent(state.pin)}`);
+    const comments = await api(`/api/tz/${tzId}/comments`);
     tzCommentsCount.textContent = comments.length ? `(${comments.length})` : '';
     const isSA = state.adminRole === 'superadmin';
 
@@ -2803,7 +2807,7 @@ function renderTzLinkedTasks(tzId, data) {
       if (q.length < 2) { searchResults.style.display = 'none'; return; }
       _linkSearchTimer = setTimeout(async () => {
         try {
-          const res = await api(`/api/search?q=${encodeURIComponent(q)}&pin=${encodeURIComponent(state.pin)}`);
+          const res = await api(`/api/search?q=${encodeURIComponent(q)}`);
           const tzResults = (res.tz || []).filter((t) => t.id !== tzId && !links.includes(t.id)).slice(0, 10);
           if (!tzResults.length) { searchResults.innerHTML = '<div class="tz-link-search-empty">Ничего не найдено</div>'; searchResults.style.display = 'block'; return; }
           searchResults.innerHTML = tzResults.map((t) =>
@@ -3313,6 +3317,12 @@ function openBoardSettingsModal() {
   // Bind overlay close once (not inside bindSettingsEvents to avoid listener stacking)
   overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
 
+  function updateBoardInState(board, newData) {
+    Object.assign(board, newData);
+    const idx = state.tzBoards.findIndex(b => b.id === board.id);
+    if (idx >= 0) state.tzBoards[idx] = newData;
+  }
+
   function bindSettingsEvents() {
     document.getElementById('bsClose')?.addEventListener('click', () => overlay.remove());
 
@@ -3334,9 +3344,7 @@ function openBoardSettingsModal() {
             )
           })
         });
-        Object.assign(board, result.board);
-        const idx = state.tzBoards.findIndex(b => b.id === board.id);
-        if (idx >= 0) state.tzBoards[idx] = result.board;
+        updateBoardInState(board, result.board);
         msg(document.getElementById('bsMsg'), 'Сохранено', 'success');
         renderTzFilters();
       } catch (err) {
@@ -3378,9 +3386,7 @@ function openBoardSettingsModal() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin, name: newName })
           });
-          Object.assign(board, result.board);
-          const idx = state.tzBoards.findIndex(b => b.id === board.id);
-          if (idx >= 0) state.tzBoards[idx] = result.board;
+          updateBoardInState(board, result.board);
         } catch (err) { showToast(err.message, 'danger'); }
       });
     });
@@ -3395,9 +3401,7 @@ function openBoardSettingsModal() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin, color: inp.value })
           });
-          Object.assign(board, result.board);
-          const idx = state.tzBoards.findIndex(b => b.id === board.id);
-          if (idx >= 0) state.tzBoards[idx] = result.board;
+          updateBoardInState(board, result.board);
         } catch (err) { showToast(err.message, 'danger'); }
       });
     });
@@ -3412,9 +3416,7 @@ function openBoardSettingsModal() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin, wip_limit: parseInt(inp.value, 10) || 0 })
           });
-          Object.assign(board, result.board);
-          const idx = state.tzBoards.findIndex(b => b.id === board.id);
-          if (idx >= 0) state.tzBoards[idx] = result.board;
+          updateBoardInState(board, result.board);
           showToast('WIP-лимит обновлён', 'ok');
         } catch (err) { showToast(err.message, 'danger'); }
       });
@@ -3430,9 +3432,7 @@ function openBoardSettingsModal() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin })
           });
-          Object.assign(board, result.board);
-          const idx = state.tzBoards.findIndex(b => b.id === board.id);
-          if (idx >= 0) state.tzBoards[idx] = result.board;
+          updateBoardInState(board, result.board);
           refreshSettings();
         } catch (err) { showToast(err.message, 'danger'); }
       });
@@ -3452,9 +3452,7 @@ function openBoardSettingsModal() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin, target_column: targetCol })
           });
-          Object.assign(board, result.board);
-          const idx = state.tzBoards.findIndex(b => b.id === board.id);
-          if (idx >= 0) state.tzBoards[idx] = result.board;
+          updateBoardInState(board, result.board);
           refreshSettings();
         } catch (err) { showToast(err.message, 'danger'); }
       });
@@ -3471,9 +3469,7 @@ function openBoardSettingsModal() {
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ pin: state.pin, name, color })
         });
-        Object.assign(board, result.board);
-        const idx = state.tzBoards.findIndex(b => b.id === board.id);
-        if (idx >= 0) state.tzBoards[idx] = result.board;
+        updateBoardInState(board, result.board);
         refreshSettings();
       } catch (err) { showToast(err.message, 'danger'); }
     });
@@ -3526,9 +3522,7 @@ function openBoardSettingsModal() {
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin, order })
           });
-          Object.assign(board, result.board);
-          const idx = state.tzBoards.findIndex(b => b.id === board.id);
-          if (idx >= 0) state.tzBoards[idx] = result.board;
+          updateBoardInState(board, result.board);
         } catch (err) { showToast(err.message, 'danger'); }
       });
     });
@@ -3586,7 +3580,7 @@ async function renderKbCategories() {
   });
 
   try {
-    const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+    const cats = await api(`/api/kb/categories`);
     state.kbCategories = cats;
     if (!cats.length) {
       kbContent.innerHTML = isSuperadmin
@@ -3720,7 +3714,7 @@ async function renderKbArticle() {
   const isSuperadmin = state.adminRole === 'superadmin';
 
   try {
-    const article = await api(`/api/kb/articles/${state.kbArticleId}?pin=${encodeURIComponent(state.pin)}`);
+    const article = await api(`/api/kb/articles/${state.kbArticleId}`);
     const cat = state.kbCategories.find((c) => c.id === article.category_id);
     const catName = cat ? cat.name : '';
 
@@ -3884,7 +3878,7 @@ async function openKbEditor(article) {
   msg(kbEditorMessage, '');
 
   // Populate categories select
-  const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+  const cats = await api(`/api/kb/categories`);
   kbEditorCategory.innerHTML = cats.map((c) =>
     `<option value="${esc(c.id)}"${article && article.category_id === c.id ? ' selected' : ''}>${esc(c.name)}</option>`
   ).join('');
@@ -4004,7 +3998,7 @@ async function openKbCategoriesManager() {
 
 async function renderKbCategoriesList() {
   try {
-    const cats = await api(`/api/kb/categories?pin=${encodeURIComponent(state.pin)}`);
+    const cats = await api(`/api/kb/categories`);
     if (!cats.length) {
       kbCategoriesList.innerHTML = '<p class="kb-empty">Нет категорий</p>';
       return;
@@ -4066,7 +4060,7 @@ kbCategoriesPopup.addEventListener('click', (e) => { if (e.target === kbCategori
 async function loadTzTemplates() {
   if (state.adminRole !== 'superadmin') return;
   try {
-    state.tzTemplates = await api(`/api/tz-templates?pin=${encodeURIComponent(state.pin)}`);
+    state.tzTemplates = await api(`/api/tz-templates`);
   } catch { state.tzTemplates = []; }
 }
 
@@ -4331,6 +4325,7 @@ function startAiRefresh() {
 function stopAiRefresh() {
   if (aiRefreshInterval) { clearInterval(aiRefreshInterval); aiRefreshInterval = null; }
 }
+window.addEventListener('beforeunload', stopAiRefresh);
 
 async function loadAiTasks() {
   if (!state.pin || state.adminRole !== 'superadmin') return;
