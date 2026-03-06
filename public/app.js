@@ -612,6 +612,7 @@ function renderSchedule() {
     const progressPct = isCurrent ? Math.round(((nowHour - t) / step) * 100) : 0;
     const rowClass = `slot-row${isCurrent ? ' slot-now' : ''}${isPast ? ' slot-past' : ''}`;
     const progressBar = isCurrent ? `<div class="slot-progress" style="width:${progressPct}%"></div>` : '';
+    if (isCurrent) html += `<div class="slot-now-label">● сейчас</div>`;
     if (bk) {
       const isFirst = bk.startHour === t;
       const span = isFirst ? `${fmtTime(bk.startHour)}–${fmtTime(bk.endHour)}` : '';
@@ -648,8 +649,8 @@ function renderSchedule() {
   });
 
   // Auto-scroll to current time slot
-  const nowSlot = scheduleGrid.querySelector('.slot-now');
-  if (nowSlot) nowSlot.scrollIntoView({ behavior: 'smooth', block: 'center' });
+  const nowLabel = scheduleGrid.querySelector('.slot-now-label');
+  if (nowLabel) nowLabel.scrollIntoView({ behavior: 'smooth', block: 'center' });
 
   // Auto-refresh every 60s to keep "now" indicator current
   clearTimeout(renderSchedule._timer);

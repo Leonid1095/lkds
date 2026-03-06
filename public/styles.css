@@ -340,28 +340,24 @@ button{
 .slot-row:nth-child(25){animation-delay:.36s}
 .slot-row:nth-child(26){animation-delay:.375s}
 
-.slot-now{position:relative}
-.slot-now::before{
-  content:'';position:absolute;left:0;top:0;bottom:0;width:3px;
-  background:var(--accent);border-radius:3px;z-index:1;
-}
-.slot-now .slot-time{color:var(--accent);font-weight:800;position:relative}
-.slot-now .slot-time::after{
-  content:'◀ сейчас';font-size:10px;font-weight:600;color:var(--accent);
-  margin-left:6px;letter-spacing:.3px;text-transform:uppercase;
+.slot-now{position:relative;border-left:3px solid var(--accent);border-radius:4px;padding-left:6px}
+.slot-now .slot-time{color:var(--accent);font-weight:800}
+.slot-now-label{
+  font-size:10px;font-weight:700;color:var(--accent);text-transform:uppercase;
+  letter-spacing:.5px;grid-column:1/-1;margin:-4px 0 2px;
   animation:slotPulse 2s ease-in-out infinite;
 }
 @keyframes slotPulse{0%,100%{opacity:1}50%{opacity:.4}}
 .slot-now .slot-status{
   box-shadow:0 0 0 2px var(--accent);
   background:color-mix(in srgb,var(--accent) 6%,var(--bg));
+  position:relative;overflow:hidden;
 }
 .slot-progress{
   position:absolute;left:0;top:0;bottom:0;
   background:color-mix(in srgb,var(--accent) 10%,transparent);
   border-radius:10px 0 0 10px;pointer-events:none;transition:width 1s linear;
 }
-.slot-now .slot-status{position:relative;overflow:hidden}
 .slot-past{opacity:.45;filter:grayscale(.15)}
 .slot-past .slot-status.free{background:var(--bg);border-color:var(--border);color:var(--text-sec)}
 .slot-time{font-size:13px;font-weight:700;color:var(--text-sec);white-space:nowrap}
