@@ -117,6 +117,23 @@ const tzCommentsList = $('tzCommentsList');
 const tzCommentsCount = $('tzCommentsCount');
 const tzCommentInput = $('tzCommentInput');
 const tzCommentSendBtn = $('tzCommentSendBtn');
+if (tzCommentSendBtn) tzCommentSendBtn.addEventListener('click', async () => {
+  const tzId = tzCommentSendBtn.dataset.tzId;
+  if (!tzId) return;
+  const text = tzCommentInput.value.trim();
+  if (!text) return;
+  tzCommentSendBtn.disabled = true;
+  try {
+    await api(`/api/tz/${tzId}/comments`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin, text })
+    });
+    tzCommentInput.value = '';
+    await renderTzComments(tzId);
+  } catch (err) { showToast(err.message, 'danger'); }
+  finally { tzCommentSendBtn.disabled = false; }
+});
 
 /* ── KB (Wiki) DOM ── */
 const tabKb = $('tabKb');
@@ -208,6 +225,7 @@ const state = {
 let _tzSearchTimer = null;
 let _kbSearchTimer = null;
 let _globalSearchTimer = null;
+let _linkSearchTimer = null;
 
 /* ── Helpers ── */
 
@@ -604,6 +622,7 @@ function renderSchedule() {
   const nowHour = now.getHours() + now.getMinutes() / 60;
 
   let html = '';
+  let slotIdx = 0;
   for (let t = startHour; t < endHour; t += step) {
     const label = `${fmtTime(t)} – ${fmtTime(t + step)}`;
     const bk = state.bookings.find((b) => b.startHour <= t && b.endHour > t);
@@ -619,7 +638,7 @@ function renderSchedule() {
       const isOwn = bk.fullName === state.user.fullName;
       const cancelBtn = (isOwn || state.isAdmin)
         ? ` <button class="btn-cancel-slot" data-bid="${bk.id}" data-hour="${t}" title="Отменить">✕</button>` : '';
-      html += `<div class="${rowClass}">
+      html += `<div class="${rowClass}" style="--i:${slotIdx}">
         <div class="slot-time">${label}</div>
         <div class="slot-status busy">
           ${progressBar}
@@ -631,11 +650,12 @@ function renderSchedule() {
         </div>
       </div>`;
     } else {
-      html += `<div class="${rowClass}">
+      html += `<div class="${rowClass}" style="--i:${slotIdx}">
         <div class="slot-time">${label}</div>
         <div class="slot-status free${isPast ? '' : ' clickable'}" ${isPast ? '' : `data-hour="${t}"`}>${isPast ? '—' : 'Свободно'}</div>
       </div>`;
     }
+    slotIdx++;
   }
   scheduleGrid.innerHTML = html;
   scheduleGrid.querySelectorAll('.clickable').forEach((el) => {
@@ -2731,22 +2751,8 @@ async function renderTzComments(tzId) {
       });
     }
 
-    // Send handler (re-bind each time to capture current tzId)
-    tzCommentSendBtn.onclick = async () => {
-      const text = tzCommentInput.value.trim();
-      if (!text) return;
-      tzCommentSendBtn.disabled = true;
-      try {
-        await api(`/api/tz/${tzId}/comments`, {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, text })
-        });
-        tzCommentInput.value = '';
-        await renderTzComments(tzId);
-      } catch (err) { showToast(err.message, 'danger'); }
-      finally { tzCommentSendBtn.disabled = false; }
-    };
+    // Store tzId in data attr; handler bound once below
+    tzCommentSendBtn.dataset.tzId = tzId;
 
     show(tzCommentsSection);
   } catch {
@@ -2789,7 +2795,7 @@ function renderTzLinkedTasks(tzId, data) {
   // Bind search-as-you-type for adding links
   const searchInput = document.getElementById('tzLinkSearchInput');
   const searchResults = document.getElementById('tzLinkSearchResults');
-  let _linkSearchTimer = null;
+  // uses module-scope _linkSearchTimer
   if (searchInput) {
     searchInput.addEventListener('input', () => {
       clearTimeout(_linkSearchTimer);
@@ -3073,7 +3079,13 @@ function renderKanban(data) {
   });
 }
 
+let _kanbanDnDAbort = null;
 function initKanbanDnD() {
+  // Cleanup previous listeners
+  if (_kanbanDnDAbort) _kanbanDnDAbort.abort();
+  _kanbanDnDAbort = new AbortController();
+  const sig = { signal: _kanbanDnDAbort.signal };
+
   let dragTzId = null;
   let dragFromStatus = null;
 
@@ -3093,7 +3105,7 @@ function initKanbanDnD() {
     card.classList.add('dragging');
     e.dataTransfer.effectAllowed = 'move';
     e.dataTransfer.setData('text/plain', dragTzId);
-  });
+  }, sig);
 
   board.addEventListener('dragend', (e) => {
     const card = e.target.closest('.kanban-card');
@@ -3104,7 +3116,7 @@ function initKanbanDnD() {
     });
     dragTzId = null;
     dragFromStatus = null;
-  });
+  }, sig);
 
   board.addEventListener('dragover', (e) => {
     e.preventDefault();
@@ -3124,7 +3136,7 @@ function initKanbanDnD() {
       col.classList.remove('drag-over');
       e.dataTransfer.dropEffect = 'none';
     }
-  });
+  }, sig);
 
   board.addEventListener('dragleave', (e) => {
     const col = getColumn(e.target);
@@ -3134,7 +3146,7 @@ function initKanbanDnD() {
       col.classList.remove('drag-over');
       col.classList.remove('drag-forbidden');
     }
-  });
+  }, sig);
 
   board.addEventListener('drop', async (e) => {
     e.preventDefault();
@@ -3160,7 +3172,7 @@ function initKanbanDnD() {
     } catch (err) {
       showToast(err.message, 'danger');
     }
-  });
+  }, sig);
 }
 
 /* ── Board settings modal ── */
@@ -3741,7 +3753,7 @@ async function renderKbArticle() {
     let toolbarHtml = '<div class="kb-toolbar-row">';
     if (isSuperadmin) {
       toolbarHtml += `<button class="btn-sm btn-kb-manage" id="kbEditArticleBtn">Редактировать</button>`;
-      toolbarHtml += `<button class="btn-sm btn-danger-outline" id="kbDeleteArticleBtn">Удалить</button>`;
+      toolbarHtml += `<button class="btn-sm btn-danger-outline-sm" id="kbDeleteArticleBtn">Удалить</button>`;
     }
     toolbarHtml += '</div>';
     kbToolbar.innerHTML = toolbarHtml;
@@ -3891,7 +3903,7 @@ async function openKbEditor(article) {
     const q = initQuill();
     if (q) {
       if (article && article.content) {
-        q.root.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen', 'class'] }) : article.content;
+        q.root.innerHTML = typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen', 'class'] }) : esc(article.content);
       } else {
         q.root.innerHTML = '';
       }
@@ -4002,7 +4014,7 @@ async function renderKbCategoriesList() {
         <span class="kb-cat-manage-icon">${kbIcon(c.icon)}</span>
         <span class="kb-cat-manage-name">${esc(c.name)}</span>
         <span class="kb-cat-manage-count">${c.articleCount}</span>
-        <button class="btn-sm btn-danger-outline kb-cat-delete-btn" data-cat-id="${esc(c.id)}" title="Удалить">&times;</button>
+        <button class="btn-sm btn-danger-outline-sm kb-cat-delete-btn" data-cat-id="${esc(c.id)}" title="Удалить">&times;</button>
       </div>
     `).join('');
 

@@ -108,6 +108,10 @@ app.use('/api/bookings', userActionLimiter);
 app.use('/api/tickets', userActionLimiter);
 app.use('/api/it-tickets', userActionLimiter);
 app.use('/api/suggestions', userActionLimiter);
+app.use('/api/profile', userActionLimiter);
+app.use('/api/search', userActionLimiter);
+app.use('/api/kb', userActionLimiter);
+app.use('/api/team', userActionLimiter);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -357,12 +361,14 @@ const avatarUpload = multer({
 
 app.use((req, res, next) => {
   if (['POST', 'PATCH', 'PUT', 'DELETE'].includes(req.method)) {
-    const origin = req.get('origin');
-    if (origin) {
-      const allowed = [publicBaseUrl, `http://localhost:${port}`, `https://localhost:${port}`];
-      if (!allowed.includes(origin)) {
-        return res.status(403).json({ message: 'Запрос заблокирован (origin).' });
-      }
+    const origin = req.get('origin') || req.get('referer');
+    if (!origin) {
+      return res.status(403).json({ message: 'Запрос заблокирован (отсутствует origin).' });
+    }
+    const allowed = [publicBaseUrl, `http://localhost:${port}`, `https://localhost:${port}`];
+    const originHost = origin.replace(/\/+$/, '').split('/').slice(0, 3).join('/');
+    if (!allowed.includes(originHost)) {
+      return res.status(403).json({ message: 'Запрос заблокирован (origin).' });
     }
   }
   next();
@@ -1353,7 +1359,8 @@ app.post('/api/admin/update-user', async (req, res) => {
   const contact = clip(String(req.body.contact || '').trim(), 200);
   const newPin = String(req.body.newPin || '').trim();
 
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
 
   return withLock(FILES.users, async () => {

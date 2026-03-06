@@ -13,7 +13,7 @@ const BOARDS_FILE = path.join(rootDir, 'data', 'boards.json');
 const BOOKINGS_FILE = path.join(rootDir, 'data', 'bookings.json');
 const ROOMS_FILE = path.join(rootDir, 'data', 'rooms.json');
 const USERS_FILE = path.join(rootDir, 'data', 'users.json');
-const CLAUDE_BIN = '/home/plg/.nvm/versions/node/v20.19.4/bin/claude';
+const CLAUDE_BIN = process.env.CLAUDE_BIN || '/home/plg/.nvm/versions/node/v20.19.4/bin/claude';
 const POLL_INTERVAL = 5000;
 const TASK_TIMEOUT = 300000;
 
