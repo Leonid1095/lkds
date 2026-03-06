@@ -300,3 +300,136 @@
 
 15. ~~**Таб «ИТ-заявка» помечен «В разработке», хотя функционал рабочий.**~~ ✅
     Исправлено: ярлык убран.
+
+---
+
+## Этап 5.0 — Аудит и стабилизация (по результатам анализа 2026-03-06)
+
+### 🔴 Критические баги
+
+16. **`authUser` не определён в `/api/admin/update-user`.**
+    `auditLog('update-user', authUser.fullName, ...)` — переменная не объявлена, endpoint крашится.
+    → Заменить на `user.fullName` (из `requireSuperAdmin`).
+
+17. **Утечка event listeners в kanban DnD.**
+    `initKanbanDnD()` вызывается при каждом рендере, но старые drag/drop обработчики не удаляются.
+    → Сохранять AbortController, отменять перед re-init.
+
+18. **Shadowed `_linkSearchTimer` в `renderTzLinkedTasks()`.**
+    `let _linkSearchTimer` объявлен внутри функции, затеняет модульную переменную — старые таймеры не очищаются.
+    → Убрать `let`, использовать модульную переменную.
+
+19. **DOMPurify fallback — XSS.**
+    Если DOMPurify не загрузился, KB-статьи рендерятся через `innerHTML` без санитизации.
+    → Fallback на `textContent` или блокировать рендер HTML без DOMPurify.
+
+### 🟡 Безопасность
+
+20. **CSRF: Origin-проверка пропускается при отсутствии заголовка.**
+    → Требовать наличие `Origin` или `Referer` на мутирующих запросах.
+
+21. **PIN в URL query string.**
+    `/api/profile/:pin`, `/api/tz/:id/comments?pin=` — PIN в логах, истории браузера.
+    → Перевести на POST body или заголовок `X-Auth-Pin`.
+
+22. **Rate limiting пробелы.**
+    Нет лимитов на: `/api/profile/:pin` (перебор PIN), `/api/search`, `/api/kb/*`.
+    → Добавить `userActionLimiter` на эти эндпоинты.
+
+23. **Avatar upload: auth после загрузки.**
+    Файл загружается до проверки авторизации, temp-файл не чистится при ошибке.
+    → Проверять PIN до вызова multer (через query param или header).
+
+### 🟡 Утечки памяти (фронтенд)
+
+24. **Event listeners копятся при re-render.**
+    `renderTzList()`, `renderTzComments()`, `renderMyItTickets()` — при каждом рендере вешают новые обработчики.
+    → Перейти на event delegation (1 listener на контейнер, проверка `e.target`).
+
+25. **`renderTzComments()` перезаписывает `onclick` глобальной кнопки.**
+    `tzCommentSendBtn.onclick = async () => {...}` — при быстром переключении ТЗ может отправить не тому.
+    → Хранить текущий `tzId` в `data-` атрибуте, читать при клике.
+
+26. **AI refresh interval не очищается при закрытии вкладки.**
+    `setInterval(loadAiTasks, 5000)` — нет `beforeunload` cleanup.
+    → Добавить `window.addEventListener('beforeunload', stopAiRefresh)`.
+
+### 🟡 Архитектура сервера
+
+27. **100+ повторений PIN-проверки.**
+    Каждый endpoint вручную: `const pin = ...; const user = await getUserByPin(pin);`.
+    → Auth-middleware: `app.use('/api/...', authMiddleware)` сохраняет `req.user`.
+
+28. **N+1 чтение файлов.**
+    Каждый запрос читает целый JSON (users.json, tz.json, boards.json) заново.
+    → Request-scoped cache или in-memory cache с TTL (аналогично `_pinCache`).
+
+29. **Нет транзакций для bidirectional TZ links.**
+    PUT /api/tz/:id обновляет linked_tz_ids в двух записях раздельно — при сбое рассинхрон.
+    → Оборачивать обе записи в одну атомарную операцию через `withLock`.
+
+30. **Тихое проглатывание невалидных полей в PUT /api/tz/:id.**
+    Невалидные URL, даты, UUID пропускаются через `continue` без уведомления.
+    → Собирать warnings[], возвращать в ответе `{ ...data, warnings }`.
+
+### 🟡 Качество кода (фронтенд)
+
+31. **Дублирование паттерна обновления board state (5+ мест).**
+    ```js
+    Object.assign(board, result.board);
+    const idx = state.tzBoards.findIndex(b => b.id === board.id);
+    if (idx >= 0) state.tzBoards[idx] = result.board;
+    ```
+    → Вынести в `updateBoardInState(board)`.
+
+32. **Дублирование popup-close (6+ мест).**
+    → Универсальный `closePopup(el)` или `data-close-popup` атрибут.
+
+33. **Отсутствие debounce cleanup.**
+    Множественные `_searchTimer` переменные с `clearTimeout/setTimeout` без гарантии очистки.
+    → Вынести в единый `debounce(fn, ms)` хелпер.
+
+### 🟡 CSS / HTML / Доступность
+
+34. **Нет ARIA-атрибутов.**
+    0 `aria-label`, нет `role="dialog"` на попапах, нет `aria-current="page"` на табах.
+    → Добавить ARIA на интерактивные элементы, попапы, навигацию.
+
+35. **Нет тёмной темы.**
+    Нет `prefers-color-scheme` — при тёмной системной теме слепит.
+    → Добавить CSS-переменные для dark mode.
+
+36. **Дубль `.btn-danger-outline`.**
+    Определён дважды (строки ~552 и ~1460).
+    → Удалить дубликат.
+
+37. **26 правил `nth-child` для анимации слотов.**
+    → Заменить на CSS-переменную: `style="--i:N"` + `animation-delay: calc(var(--i) * 15ms)`.
+
+38. **Отсутствует `<dialog>` для попапов.**
+    Все модалки — `<div>` без семантики.
+    → Заменить на `<dialog>` с `showModal()`/`close()`.
+
+### 🟢 Инфраструктура (на будущее)
+
+39. **Нет автотестов (0 тестов).**
+    → Добавить хотя бы endpoint-тесты для auth, TZ CRUD, bookings.
+
+40. **Нет CI/CD.**
+    → GitHub Actions: lint + test на push.
+
+41. **Нет structured logging.**
+    Только `console.error` — невозможно диагностировать проблемы в проде.
+    → Pino / Winston с JSON-логами в файл.
+
+42. **Нет бэкапов.**
+    data/ — единственная копия данных.
+    → Cron-задача: ежедневный tar data/ → backup location.
+
+43. **Hardcoded путь к Claude CLI.**
+    `ai-worker.js:16` — `/home/plg/.nvm/versions/node/v20.19.4/bin/claude`.
+    → Вынести в `.env` (`CLAUDE_BIN`).
+
+44. **Worker polling каждые 5 сек.**
+    Расход CPU/IO даже без задач.
+    → Увеличить до 30 сек или перейти на event-driven (файловый watch / HTTP trigger).
