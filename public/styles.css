@@ -1636,3 +1636,41 @@ button{
   cursor: pointer; transition: background .2s;
 }
 .onboarding-ok:hover { background: #2b6cb0; }
+
+/* ── Dark mode ── */
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #0f1117;
+    --card: #1a1d2e;
+    --text: #e2e8f0;
+    --text-sec: #a0aec0;
+    --primary: #1e3a5f;
+    --primary-hover: #2a4a7f;
+    --accent: #4da3e0;
+    --accent-soft: #1a2d42;
+    --border: #2d3748;
+    --danger: #fc8181;
+    --danger-soft: #2d1b1b;
+    --ok: #68d391;
+    --ok-soft: #1b2d1b;
+    --disabled: #4a5568;
+    --shadow: 0 2px 12px rgba(0,0,0,.3);
+    --shadow-lg: 0 8px 32px rgba(0,0,0,.5);
+  }
+  body{background:var(--bg);color:var(--text)}
+  .topbar{background:var(--primary)}
+  .slot-status.free{background:var(--ok-soft);border-color:#2d4a2d;color:var(--ok)}
+  .popup-card,.profile-card,.tz-detail-card{background:var(--card);color:var(--text)}
+  input,select,textarea{background:var(--card);color:var(--text);border-color:var(--border)}
+  .tab{color:var(--text-sec)}
+  .tab.active{color:var(--accent);border-color:var(--accent)}
+  .kanban-column{background:var(--card)}
+  .kanban-card{background:var(--bg);border-color:var(--border)}
+  .tz-table tr:hover{background:rgba(255,255,255,.03)}
+  .tz-table th{background:var(--card)}
+  .kb-article-body pre{background:#1a1d2e;color:#e2e8f0}
+  .booking-reminder{background:linear-gradient(90deg,#2d1f0f,#3d2a15);color:#fbd38d;border-color:#4a3520}
+  .onboarding-overlay{background:rgba(0,0,0,.7)}
+  .onboarding-card{background:var(--card);color:var(--text)}
+  img{filter:brightness(.95)}
+}
