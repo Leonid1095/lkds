@@ -2405,7 +2405,7 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
   });
 
   // Use board columns if available, fallback to global statuses
-  const boardColumns = board ? board.columns.sort((a, b) => a.order - b.order) : null;
+  const boardColumns = board ? board.columns.slice().sort((a, b) => a.order - b.order) : null;
   const colIds = boardColumns ? boardColumns.map(c => c.id) : TZ_STATUSES;
   const statusLabels = boardColumns
     ? Object.fromEntries(boardColumns.map(c => [c.id, c.name]))
@@ -2413,11 +2413,22 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
 
   const columns = {};
   for (const s of colIds) columns[s] = [];
+  const orphanColId = '__orphan__';
+  let hasOrphans = false;
   for (const item of items) {
-    if (columns[item.status]) columns[item.status].push(item);
-    else {
-      columns[item.status] = [item];
+    if (columns[item.status]) {
+      columns[item.status].push(item);
+    } else {
+      // Card with status not in board columns (e.g. column was deleted)
+      if (!columns[orphanColId]) columns[orphanColId] = [];
+      columns[orphanColId].push(item);
+      hasOrphans = true;
     }
+  }
+  if (hasOrphans) {
+    colIds.push(orphanColId);
+    statusLabels[orphanColId] = 'Без колонки';
+    if (boardColumns) boardColumns.push({ id: orphanColId, name: 'Без колонки', color: '#fed7d7', order: 9999, hidden: false, wip_limit: 0 });
   }
 
   // Free-form transitions: any column → any other column

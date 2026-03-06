@@ -2783,9 +2783,22 @@ function kanbanCardHtml(tz, mini) {
   if (f.overdue) flagsHtml += '<span class="kanban-flag kanban-flag-overdue">Просрочено</span>';
   else if (f.deadline_soon) flagsHtml += '<span class="kanban-flag kanban-flag-soon">Скоро дедлайн</span>';
 
-  // Nearest deadline
+  // Nearest active deadline based on current phase
   let deadlineHtml = '';
-  const dl = tz.deadline || tz.date_analysis_deadline || tz.date_dev_deadline || tz.date_release_deadline;
+  const status = tz.status || '';
+  const doneStatuses = ['production', 'partial', 'cancelled'];
+  const devStatuses = ['development', 'testing'];
+  const releaseStatuses = ['release'];
+  let dl = null;
+  if (!doneStatuses.includes(status)) {
+    if (!devStatuses.includes(status) && !releaseStatuses.includes(status)) {
+      dl = tz.date_analysis_deadline || tz.date_dev_deadline || tz.date_release_deadline || tz.deadline;
+    } else if (devStatuses.includes(status)) {
+      dl = tz.date_dev_deadline || tz.date_release_deadline || tz.deadline;
+    } else {
+      dl = tz.date_release_deadline || tz.deadline;
+    }
+  }
   if (dl && !mini) {
     const days = Math.ceil((new Date(dl) - new Date()) / 86400000);
     const dlLabel = days < 0 ? `${Math.abs(days)}д назад` : days === 0 ? 'сегодня' : `${days}д`;
@@ -2858,7 +2871,7 @@ function initKanbanDnD() {
   let dragFromStatus = null;
 
   // Use event delegation on the board container for reliable DnD
-  const board = tzListContainer.querySelector('.kanban-board');
+  const board = tzListContainer.querySelector('.kanban-board') || tzListContainer.querySelector('.kanban-swimlane-board');
   if (!board) return;
 
   function getColumn(el) {
@@ -4013,11 +4026,24 @@ function renderKanbanSwimlanes(data, swimlaneType) {
   state.kanbanTransitions = transitions || {};
   const { displayOrder, colorMap } = kanbanResolveDisplay(data);
 
+  // Count totals per column across all swimlanes
+  const colTotals = {};
+  for (const status of displayOrder) {
+    colTotals[status] = swimlanes.reduce((sum, sl) => sum + (sl.columns[status] || []).length, 0);
+  }
+
   let html = '<div class="kanban-swimlane-board">';
   html += '<div class="kanban-swimlane-header"><div class="kanban-sl-label"></div>';
   for (const status of displayOrder) {
     const color = colorMap[status] || '#edf2f7';
-    html += `<div class="kanban-sl-col-header" style="background:${color}">${esc(statusLabels[status] || status)}</div>`;
+    const bcol = (data.boardColumns || []).find(c => c.id === status);
+    const wipLimit = bcol ? bcol.wip_limit || 0 : 0;
+    const total = colTotals[status] || 0;
+    const wipOver = wipLimit > 0 && total > wipLimit;
+    html += `<div class="kanban-sl-col-header${wipOver ? ' kanban-sl-wip-over' : ''}" style="background:${color}">
+      ${esc(statusLabels[status] || status)}
+      <span class="kanban-sl-col-count">${total}${wipLimit ? `/${wipLimit}` : ''}</span>
+    </div>`;
   }
   html += '</div>';
 

@@ -1523,6 +1523,9 @@ button{
   min-width:180px;flex:1;padding:4px;margin:0 3px;background:#f7f9fc;
   display:flex;flex-direction:column;gap:4px;
 }
+.kanban-sl-col-count{font-size:10px;opacity:.85;margin-left:4px;font-weight:700}
+.kanban-sl-wip-over{outline:2px solid var(--danger);outline-offset:-2px}
+.kanban-sl-wip-over .kanban-sl-col-count{color:#fff;background:var(--danger);padding:0 5px;border-radius:6px}
 .kanban-card-mini{padding:6px 8px}
 .kanban-card-mini .kanban-card-title{font-size:12px;-webkit-line-clamp:1}
 .kanban-card-mini .kanban-card-code{font-size:11px}
