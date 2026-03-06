@@ -511,6 +511,29 @@ async function migrateBoards() {
   }
 }
 
+/** Ensure bidirectional linked_tz_ids integrity */
+async function migrateTzLinks() {
+  const allTz = await readJson(FILES.tz, []);
+  let changed = false;
+  for (const tz of allTz) {
+    const links = tz.linked_tz_ids;
+    if (!links || !links.length) continue;
+    for (const lid of links) {
+      const other = allTz.find(t => t.id === lid);
+      if (!other) continue;
+      if (!other.linked_tz_ids) other.linked_tz_ids = [];
+      if (!other.linked_tz_ids.includes(tz.id)) {
+        other.linked_tz_ids.push(tz.id);
+        changed = true;
+      }
+    }
+  }
+  if (changed) {
+    await writeJson(FILES.tz, allTz);
+    console.log('[migrate] fixed bidirectional linked_tz_ids');
+  }
+}
+
 function isValidDate(d) { return /^\d{4}-\d{2}-\d{2}$/.test(d); }
 
 function toTime(v) {
@@ -3089,6 +3112,7 @@ fs.mkdir(kbImagesDir, { recursive: true }).catch(() => {});
 
 migrateUsers()
   .then(() => migrateBoards())
+  .then(() => migrateTzLinks())
   .then(() => {
     app.listen(port, () => {
       console.log(`LKDS portal started on http://localhost:${port}`);
