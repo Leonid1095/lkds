@@ -3011,12 +3011,28 @@ function openCreateBoardModal() {
   const overlay = document.createElement('div');
   overlay.className = 'popup-overlay';
   overlay.id = 'boardCreateOverlay';
-  overlay.innerHTML = `<div class="popup-card fade-in" style="max-width:420px">
+  overlay.innerHTML = `<div class="popup-card fade-in" style="max-width:460px">
     <h3>Создать доску</h3>
     <form id="boardCreateForm" class="popup-form">
       <label>Название *<input id="bcName" required placeholder="Название доски" /></label>
       <label>Префикс кода<input id="bcPrefix" placeholder="BD" maxlength="10" style="text-transform:uppercase" /></label>
       <label>Описание<textarea id="bcDesc" rows="2" placeholder="Описание..."></textarea></label>
+      <label>Доступ<select id="bcAccess" class="tz-filter-select" style="width:100%">
+        <option value="superadmin" selected>Только суперадмин</option>
+        <option value="admins">Админы</option>
+        <option value="all">Все сотрудники</option>
+      </select></label>
+      <div style="margin:8px 0">
+        <strong style="font-size:13px">Поля карточки:</strong>
+        <div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;font-size:13px">
+          <label><input type="checkbox" class="bc-cf" data-cf-key="system" /> Система</label>
+          <label><input type="checkbox" class="bc-cf" data-cf-key="link_confluence" /> Confluence</label>
+          <label><input type="checkbox" class="bc-cf" data-cf-key="link_jira" /> Jira</label>
+          <label><input type="checkbox" class="bc-cf" data-cf-key="phase_deadlines" /> Фазовые дедлайны</label>
+          <label><input type="checkbox" class="bc-cf" data-cf-key="completion_notes" /> Примечания</label>
+          <label><input type="checkbox" class="bc-cf" data-cf-key="approval" /> Утверждение</label>
+        </div>
+      </div>
       <div class="popup-actions">
         <button type="submit" class="btn-primary">Создать</button>
         <button type="button" class="btn-outline-dark" id="bcCancel">Отмена</button>
@@ -3041,7 +3057,11 @@ function openCreateBoardModal() {
           pin: state.pin,
           name: document.getElementById('bcName').value.trim(),
           code_prefix: document.getElementById('bcPrefix').value.trim() || 'BD',
-          description: document.getElementById('bcDesc').value.trim()
+          description: document.getElementById('bcDesc').value.trim(),
+          access: document.getElementById('bcAccess').value,
+          card_fields: Object.fromEntries(
+            [...document.querySelectorAll('.bc-cf')].map(cb => [cb.dataset.cfKey, cb.checked])
+          )
         })
       });
       state.tzBoards.push(result.board);

@@ -1556,8 +1556,14 @@ app.post('/api/boards', async (req, res) => {
       default_column: 'todo',
       systems: [],
       types: ['Задача'],
-      card_fields: { system: false, link_confluence: false, link_jira: false, phase_deadlines: false, completion_notes: false, approval: false },
-      access: 'all',
+      card_fields: (() => {
+        const def = { system: false, link_confluence: false, link_jira: false, phase_deadlines: false, completion_notes: false, approval: false };
+        if (req.body.card_fields && typeof req.body.card_fields === 'object') {
+          for (const k of Object.keys(def)) { if (req.body.card_fields[k] !== undefined) def[k] = !!req.body.card_fields[k]; }
+        }
+        return def;
+      })(),
+      access: ['all', 'admins', 'superadmin'].includes(req.body.access) ? req.body.access : 'superadmin',
       is_default: false,
       created_at: now,
       updated_at: now
