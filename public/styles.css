@@ -324,6 +324,14 @@ button{
 .slot-row:nth-child(25){animation-delay:.36s}
 .slot-row:nth-child(26){animation-delay:.375s}
 
+.slot-now{position:relative}
+.slot-now::before{
+  content:'';position:absolute;left:0;right:0;top:-1px;
+  height:2px;background:var(--accent);border-radius:2px;z-index:1;
+}
+.slot-now .slot-time{color:var(--accent);font-weight:800}
+.slot-now .slot-status{box-shadow:0 0 0 2px var(--accent)}
+.slot-past{opacity:.5}
 .slot-time{font-size:13px;font-weight:700;color:var(--text-sec);white-space:nowrap}
 
 .slot-status{

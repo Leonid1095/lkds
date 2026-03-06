@@ -588,17 +588,27 @@ async function loadBookings() {
 function renderSchedule() {
   const { startHour, endHour, slotStep } = state.settings;
   const step = slotStep || 0.5;
+
+  // Determine if viewing today for "now" indicator
+  const today = new Date().toISOString().slice(0, 10);
+  const isToday = dateInput.value === today;
+  const now = new Date();
+  const nowHour = now.getHours() + now.getMinutes() / 60;
+
   let html = '';
   for (let t = startHour; t < endHour; t += step) {
     const label = `${fmtTime(t)} – ${fmtTime(t + step)}`;
     const bk = state.bookings.find((b) => b.startHour <= t && b.endHour > t);
+    const isCurrent = isToday && nowHour >= t && nowHour < t + step;
+    const isPast = isToday && nowHour >= t + step;
+    const rowClass = `slot-row${isCurrent ? ' slot-now' : ''}${isPast ? ' slot-past' : ''}`;
     if (bk) {
       const isFirst = bk.startHour === t;
       const span = isFirst ? `${fmtTime(bk.startHour)}–${fmtTime(bk.endHour)}` : '';
       const isOwn = bk.fullName === state.user.fullName;
       const cancelBtn = (isOwn || state.isAdmin)
         ? ` <button class="btn-cancel-slot" data-bid="${bk.id}" data-hour="${t}" title="Отменить">✕</button>` : '';
-      html += `<div class="slot-row">
+      html += `<div class="${rowClass}">
         <div class="slot-time">${label}</div>
         <div class="slot-status busy">
           ${esc(bk.topic)}${cancelBtn}
@@ -609,7 +619,7 @@ function renderSchedule() {
         </div>
       </div>`;
     } else {
-      html += `<div class="slot-row">
+      html += `<div class="${rowClass}">
         <div class="slot-time">${label}</div>
         <div class="slot-status free clickable" data-hour="${t}">Свободно</div>
       </div>`;
@@ -625,6 +635,10 @@ function renderSchedule() {
   scheduleGrid.querySelectorAll('.slot-profile-link').forEach((el) => {
     el.addEventListener('click', (e) => { e.preventDefault(); openProfile(el.dataset.pin); });
   });
+
+  // Auto-scroll to current time slot
+  const nowSlot = scheduleGrid.querySelector('.slot-now');
+  if (nowSlot) nowSlot.scrollIntoView({ behavior: 'smooth', block: 'center' });
 }
 
 /* ── Booking popup ── */
