@@ -819,7 +819,12 @@ app.post('/api/profile/update', async (req, res) => {
   });
 });
 
-app.post('/api/profile/avatar', (req, res) => {
+app.post('/api/profile/avatar', async (req, res) => {
+  // Auth before file upload to prevent temp file accumulation
+  const pin = getPin(req);
+  const userObj = pin ? await getUserByPin(pin) : null;
+  if (!userObj) return res.status(401).json({ message: 'Неверный пин-код.' });
+
   avatarUpload(req, res, async (err) => {
     if (err) {
       if (err.code === 'LIMIT_FILE_SIZE')
@@ -827,13 +832,6 @@ app.post('/api/profile/avatar', (req, res) => {
       return res.status(400).json({ message: 'Ошибка загрузки файла.' });
     }
     if (!req.file) return res.status(400).json({ message: 'Выберите изображение (JPG, PNG, WebP).' });
-
-    const pin = String(req.body.pin || '').trim();
-    const userObj = await getUserByPin(pin);
-    if (!userObj) {
-      await fs.unlink(req.file.path).catch(() => {});
-      return res.status(401).json({ message: 'Неверный пин-код.' });
-    }
 
     const ext = path.extname(req.file.originalname).toLowerCase() || '.jpg';
     const safeName = `${userObj.id}${ext}`;

@@ -101,6 +101,12 @@ const tabTz = $('tabTz');
 const tzStatsBar = $('tzStatsBar');
 const tzFilters = $('tzFilters');
 const tzListContainer = $('tzListContainer');
+// Event delegation for TZ list row clicks
+if (tzListContainer) tzListContainer.addEventListener('click', (e) => {
+  const row = e.target.closest('tr[data-tz-id]');
+  if (!row || e.target.closest('.tz-cb-td') || e.target.closest('.tz-link-icon')) return;
+  openTzDetail(row.dataset.tzId);
+});
 const tzMessage = $('tzMessage');
 const tzPopup = $('tzPopup');
 const tzForm = $('tzForm');
@@ -114,6 +120,24 @@ const tzHistorySection = $('tzHistorySection');
 const tzHistoryList = $('tzHistoryList');
 const tzCommentsSection = $('tzCommentsSection');
 const tzCommentsList = $('tzCommentsList');
+// Event delegation for comment delete buttons
+if (tzCommentsList) tzCommentsList.addEventListener('click', async (e) => {
+  const btn = e.target.closest('.tz-comment-delete');
+  if (!btn) return;
+  if (!confirm('Удалить комментарий?')) return;
+  const comment = btn.closest('.tz-comment');
+  const commentId = comment?.dataset.commentId;
+  const tzId = tzCommentSendBtn?.dataset.tzId;
+  if (!commentId || !tzId) return;
+  try {
+    await api(`/api/tz/${tzId}/comments/${commentId}`, {
+      method: 'DELETE',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ pin: state.pin })
+    });
+    await renderTzComments(tzId);
+  } catch (err) { showToast(err.message, 'danger'); }
+});
 const tzCommentsCount = $('tzCommentsCount');
 const tzCommentInput = $('tzCommentInput');
 const tzCommentSendBtn = $('tzCommentSendBtn');
@@ -306,9 +330,10 @@ function parseHash() {
 function switchToTab(tabName, updateHash) {
   const tab = document.querySelector(`.tab[data-tab="${tabName}"]`);
   if (!tab || tab.style.display === 'none') return false;
-  document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
+  document.querySelectorAll('.tab').forEach((t) => { t.classList.remove('active'); t.removeAttribute('aria-selected'); });
   document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
   tab.classList.add('active');
+  tab.setAttribute('aria-selected', 'true');
   const panelName = tabName.charAt(0).toUpperCase() + tabName.slice(1);
   $('panel' + panelName).classList.add('active');
   if (tabName === 'tz') loadTzData();
@@ -996,6 +1021,7 @@ function uploadAvatar(file) {
   });
 
   xhr.open('POST', '/api/profile/avatar');
+  xhr.setRequestHeader('X-Auth-Pin', state.pin);
   xhr.send(fd);
 }
 
@@ -2298,11 +2324,6 @@ function renderTzList(items) {
   html += '</table>';
   tzListContainer.innerHTML = html;
 
-  // Bind row click to open detail
-  tzListContainer.querySelectorAll('[data-tz-id]').forEach((row) => {
-    row.addEventListener('click', () => openTzDetail(row.dataset.tzId));
-  });
-
   // Bulk selection logic
   if (isSA) initTzBulk();
 }
@@ -2737,23 +2758,7 @@ async function renderTzComments(tzId) {
         </div>`).join('')
       : '<p class="tz-comments-empty">Нет комментариев</p>';
 
-    // Delete handlers
-    if (isSA) {
-      tzCommentsList.querySelectorAll('.tz-comment-delete').forEach((btn) => {
-        btn.addEventListener('click', async () => {
-          if (!confirm('Удалить комментарий?')) return;
-          const commentId = btn.closest('.tz-comment').dataset.commentId;
-          try {
-            await api(`/api/tz/${tzId}/comments/${commentId}`, {
-              method: 'DELETE',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pin: state.pin })
-            });
-            await renderTzComments(tzId);
-          } catch (err) { showToast(err.message, 'danger'); }
-        });
-      });
-    }
+    // Delete handled via delegation below
 
     // Store tzId in data attr; handler bound once below
     tzCommentSendBtn.dataset.tzId = tzId;
