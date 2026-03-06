@@ -393,13 +393,18 @@ function showMain() {
   } else {
     hide(adminBtn);
   }
-  const hasTzAccess = state.adminRole === 'superadmin' || (state.tzBoards || []).some(b => b.access === 'all' || (b.access === 'admins' && state.isAdmin));
+  const hasTzAccess = state.adminRole === 'superadmin' || (state.tzBoards || []).some(b => {
+    if (b.access === 'all') return true;
+    if (b.access === 'admins' && state.isAdmin) return true;
+    if (b.access === state.adminRole) return true; // specific role match
+    return false;
+  });
   tabTz.style.display = (state.pin && hasTzAccess) ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabKb.style.display = state.pin ? '' : 'none';
   if (metricsContent) {
     const tabMetrics = $('tabMetrics');
-    if (tabMetrics) tabMetrics.style.display = state.adminRole === 'superadmin' ? '' : 'none';
+    if (tabMetrics) tabMetrics.style.display = 'none'; // скрыто до доработки
   }
   updateTzBadge();
 }
@@ -533,6 +538,8 @@ async function loadApp() {
       state.tzBoardId = defBoard.id;
     }
   } catch { /* no tz-config */ }
+
+  try { state.roles = await api('/api/roles'); } catch { state.roles = []; }
 
   renderRooms();
   renderLinks(links);
@@ -1288,7 +1295,7 @@ adminBtn.addEventListener('click', () => {
 
   // Filter admin tabs by role
   const allAdminTabs = document.querySelectorAll('.admin-tab');
-  const superOnly = ['bookings', 'tickets', 'suggestions', 'users', 'pin-requests', 'crm-config'];
+  const superOnly = ['bookings', 'tickets', 'suggestions', 'users', 'pin-requests', 'crm-config', 'roles'];
   allAdminTabs.forEach((tab) => {
     if (state.adminRole === 'it_admin' && superOnly.includes(tab.dataset.atab)) {
       hide(tab);
@@ -1320,6 +1327,7 @@ const ADMIN_PAGE_SIZE = 50;
 
 async function loadAdminData(type, page) {
   if (type === 'crm-config') { await loadCrmConfigAdmin(); return; }
+  if (type === 'roles') { await loadRolesAdmin(); return; }
   if (page !== undefined) state.adminPage[type] = page;
   const currentPage = state.adminPage[type] || 1;
   try {
@@ -1432,6 +1440,63 @@ function fmtDate(iso) {
 
 let adminUsersCache = [];
 
+async function loadRolesAdmin() {
+  try {
+    const roles = await api('/api/roles');
+    state.roles = roles;
+    let html = '<h3 style="margin:0 0 12px">Ролевая модель</h3>';
+    html += '<table class="admin-table"><tr><th>ID</th><th>Название</th><th>Описание</th><th></th></tr>';
+    for (const r of roles) {
+      html += `<tr>
+        <td><code>${esc(r.id)}</code></td>
+        <td>${esc(r.name)}</td>
+        <td>${esc(r.description || '')}</td>
+        <td>${r.system ? '<span style="color:var(--text-sec);font-size:12px">системная</span>' : `<button class="btn-cancel-sm" data-role-id="${esc(r.id)}">Удалить</button>`}</td>
+      </tr>`;
+    }
+    html += '</table>';
+    html += `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:end">
+      <label style="flex:1;min-width:120px">Название<input id="newRoleName" placeholder="Менеджер проекта" /></label>
+      <label style="flex:2;min-width:150px">Описание<input id="newRoleDesc" placeholder="Доступ к доскам проекта" /></label>
+      <button class="btn-primary btn-sm" id="addRoleBtn">Создать роль</button>
+    </div>`;
+    html += '<p id="rolesMsg" class="message" style="margin-top:8px"></p>';
+    adminContent.innerHTML = html;
+
+    // Bind delete
+    adminContent.querySelectorAll('[data-role-id]').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm(`Удалить роль "${btn.dataset.roleId}"?`)) return;
+        try {
+          await api(`/api/admin/roles/${btn.dataset.roleId}`, {
+            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ pin: state.pin })
+          });
+          showToast('Роль удалена', 'ok');
+          loadRolesAdmin();
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+
+    // Bind create
+    $('addRoleBtn')?.addEventListener('click', async () => {
+      const name = $('newRoleName').value.trim();
+      const description = $('newRoleDesc').value.trim();
+      if (!name) { msg($('rolesMsg'), 'Укажите название', 'error'); return; }
+      try {
+        await api('/api/admin/roles', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ pin: state.pin, name, description })
+        });
+        showToast('Роль создана', 'ok');
+        loadRolesAdmin();
+      } catch (err) { msg($('rolesMsg'), err.message, 'error'); }
+    });
+  } catch (err) {
+    adminContent.innerHTML = `<p class="message error">${esc(err.message)}</p>`;
+  }
+}
+
 function renderAdminTable(type, response) {
   // Support both paginated {items, total, page, pageSize} and legacy array responses
   const isPaginated = response && typeof response === 'object' && !Array.isArray(response) && Array.isArray(response.items);
@@ -1501,18 +1566,15 @@ function renderAdminTable(type, response) {
     }
   } else if (type === 'users') {
     html += '<tr><th>ФИО</th><th>Контакт</th><th>Роль</th><th>Дата</th><th></th></tr>';
-    const roleLabels = { superadmin: 'Суперадмин', it_admin: 'ИТ-админ', employee: 'Сотрудник' };
+    const roles = state.roles || [{ id: 'employee', name: 'Сотрудник' }, { id: 'it_admin', name: 'ИТ-админ' }, { id: 'superadmin', name: 'Суперадмин' }];
     for (const u of data) {
       const role = u.role || 'employee';
+      const roleOpts = roles.map(r => `<option value="${esc(r.id)}"${r.id === role ? ' selected' : ''}>${esc(r.name)}</option>`).join('');
       html += `<tr>
         <td>${esc(u.fullName)}</td>
         <td>${esc(u.contact)}</td>
         <td>
-          <select class="role-select" data-action="set-role" data-id="${esc(u.id)}">
-            <option value="employee"${role === 'employee' ? ' selected' : ''}>Сотрудник</option>
-            <option value="it_admin"${role === 'it_admin' ? ' selected' : ''}>ИТ-админ</option>
-            <option value="superadmin"${role === 'superadmin' ? ' selected' : ''}>Суперадмин</option>
-          </select>
+          <select class="role-select" data-action="set-role" data-id="${esc(u.id)}">${roleOpts}</select>
         </td>
         <td style="white-space:nowrap">${fmtDate(u.createdAt)}</td>
         <td><button class="btn-edit-user" data-action="edit-user" data-id="${esc(u.id)}">Ред.</button></td>
@@ -1795,6 +1857,20 @@ function getBoardCardFields(board) {
   return board?.card_fields ? { ...def, ...board.card_fields } : def;
 }
 
+/** Generate access options HTML for board settings */
+function accessOptionsHtml(selected) {
+  const roles = state.roles || [];
+  let html = `<option value="superadmin"${selected === 'superadmin' ? ' selected' : ''}>Только суперадмин</option>`;
+  html += `<option value="admins"${selected === 'admins' ? ' selected' : ''}>Все админы</option>`;
+  // Add custom roles (not employee, superadmin)
+  for (const r of roles) {
+    if (r.id === 'superadmin' || r.id === 'employee') continue;
+    html += `<option value="${esc(r.id)}"${selected === r.id ? ' selected' : ''}>Роль: ${esc(r.name)}</option>`;
+  }
+  html += `<option value="all"${selected === 'all' ? ' selected' : ''}>Все сотрудники</option>`;
+  return html;
+}
+
 /** Show/hide form fields based on board card_fields config */
 function applyBoardCardFields(board) {
   const cf = getBoardCardFields(board);
@@ -1881,6 +1957,7 @@ function renderTzFilters() {
     if (isSA) return true;
     if (b.access === 'all') return true;
     if (b.access === 'admins' && state.isAdmin) return true;
+    if (b.access === state.adminRole) return true;
     return false;
   });
   let boardTabsHtml = '';
@@ -2195,7 +2272,8 @@ async function loadTzData() {
   const boardAccess = curBoard?.access || 'superadmin';
   const canAccess = state.adminRole === 'superadmin'
     || boardAccess === 'all'
-    || (boardAccess === 'admins' && state.isAdmin);
+    || (boardAccess === 'admins' && state.isAdmin)
+    || boardAccess === state.adminRole;
   if (!canAccess) return;
   msg(tzMessage, '');
   const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
@@ -3031,11 +3109,7 @@ function openCreateBoardModal() {
       <label>Название *<input id="bcName" required placeholder="Название доски" /></label>
       <label>Префикс кода<input id="bcPrefix" placeholder="BD" maxlength="10" style="text-transform:uppercase" /></label>
       <label>Описание<textarea id="bcDesc" rows="2" placeholder="Описание..."></textarea></label>
-      <label>Доступ<select id="bcAccess" class="tz-filter-select" style="width:100%">
-        <option value="superadmin" selected>Только суперадмин</option>
-        <option value="admins">Админы</option>
-        <option value="all">Все сотрудники</option>
-      </select></label>
+      <label>Доступ<select id="bcAccess" class="tz-filter-select" style="width:100%">${accessOptionsHtml('superadmin')}</select></label>
       <div style="margin:8px 0">
         <strong style="font-size:13px">Поля карточки:</strong>
         <div style="display:flex;flex-wrap:wrap;gap:6px 14px;margin-top:6px;font-size:13px">
@@ -3137,11 +3211,7 @@ function openBoardSettingsModal() {
         <button type="button" class="btn-primary btn-sm" id="bsAddCol">+</button>
       </div>
       <h4 style="margin:16px 0 8px">Доступ</h4>
-      <label><select id="bsAccess" class="tz-filter-select" style="width:100%">
-        <option value="superadmin"${(board.access || 'superadmin') === 'superadmin' ? ' selected' : ''}>Только суперадмин</option>
-        <option value="admins"${board.access === 'admins' ? ' selected' : ''}>Админы</option>
-        <option value="all"${board.access === 'all' ? ' selected' : ''}>Все сотрудники</option>
-      </select></label>
+      <label><select id="bsAccess" class="tz-filter-select" style="width:100%">${accessOptionsHtml(board.access || 'superadmin')}</select></label>
       <h4 style="margin:16px 0 8px">Поля карточки</h4>
       <div class="board-card-fields" style="display:flex;flex-wrap:wrap;gap:8px 16px;font-size:13px">
         ${[

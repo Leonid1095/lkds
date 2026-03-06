@@ -48,7 +48,8 @@ const FILES = {
   aiTasks: path.join(dataDir, 'ai-tasks.json'),
   tzComments: path.join(dataDir, 'tz-comments.json'),
   tzTemplates: path.join(dataDir, 'tz-templates.json'),
-  auditLog: path.join(dataDir, 'audit-log.json')
+  auditLog: path.join(dataDir, 'audit-log.json'),
+  roles: path.join(dataDir, 'roles.json')
 };
 
 /* ── Security middleware ── */
@@ -530,6 +531,21 @@ async function migrateBoards() {
   }
 }
 
+const DEFAULT_ROLES = [
+  { id: 'superadmin', name: 'Суперадмин', description: 'Полный доступ ко всем разделам', system: true },
+  { id: 'it_admin', name: 'ИТ-админ', description: 'Доступ к ИТ-заявкам', system: true },
+  { id: 'employee', name: 'Сотрудник', description: 'Базовый доступ', system: true }
+];
+
+async function migrateRoles() {
+  let roles = await readJson(FILES.roles, null);
+  if (!roles) {
+    roles = DEFAULT_ROLES;
+    await writeJson(FILES.roles, roles);
+    console.log('[migrate] roles.json created with default roles');
+  }
+}
+
 /** Ensure bidirectional linked_tz_ids integrity */
 async function migrateTzLinks() {
   const allTz = await readJson(FILES.tz, []);
@@ -634,7 +650,7 @@ async function recordTzHistory(tzId, field, oldValue, newValue, changedBy) {
 function getUserRole(pin, user) {
   if (ADMIN_PINS.has(pin)) return 'superadmin';
   if (!user) return null;
-  if (user.role === 'superadmin' || user.role === 'it_admin') return user.role;
+  if (user.role && user.role !== 'employee') return user.role;
   if (user.isAdmin) return 'superadmin'; // backward compat
   return null;
 }
@@ -1211,6 +1227,7 @@ async function requireAdmin(pin) {
 }
 
 /** Check board access: 'all' = any authed user, 'admins' = admin+, 'superadmin' = superadmin only */
+/** Check board access: 'all', 'admins', 'superadmin', or specific role id (e.g. 'it_admin') */
 async function requireBoardAccess(pin, board) {
   const access = board?.access || 'superadmin';
   if (access === 'all') {
@@ -1218,7 +1235,13 @@ async function requireBoardAccess(pin, board) {
     return user || null;
   }
   if (access === 'admins') return requireAdmin(pin);
-  return requireSuperAdmin(pin);
+  if (access === 'superadmin') return requireSuperAdmin(pin);
+  // Specific role: check if user has this role or is superadmin
+  const user = await getUserByPin(pin);
+  if (!user) return null;
+  const userRole = getUserRole(pin, user);
+  if (userRole === 'superadmin' || userRole === access) return user;
+  return null;
 }
 
 function paginate(items, page, pageSize) {
@@ -1366,8 +1389,9 @@ app.post('/api/admin/set-role', async (req, res) => {
 
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
-  if (!['superadmin', 'it_admin', 'employee'].includes(role))
-    return res.status(400).json({ message: 'Роль: superadmin, it_admin или employee.' });
+  const roles = await readJson(FILES.roles, DEFAULT_ROLES);
+  if (!roles.some(r => r.id === role))
+    return res.status(400).json({ message: `Неизвестная роль: ${role}.` });
 
   const users = await readJson(FILES.users, []);
   const target = users.find((u) => u.id === targetId);
@@ -1385,6 +1409,53 @@ app.post('/api/admin/set-role', async (req, res) => {
   invalidatePinCacheByUserId(targetId);
   auditLog('set-role', 'admin', { targetId, targetName: target.fullName, role });
   return res.json({ id: targetId, role });
+});
+
+/* ── Roles management ── */
+
+app.get('/api/roles', async (_req, res) => {
+  const roles = await readJson(FILES.roles, DEFAULT_ROLES);
+  res.json(roles);
+});
+
+app.post('/api/admin/roles', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const name = clip(String(req.body.name || '').trim(), 50);
+  if (!name || name.length < 2) return res.status(400).json({ message: 'Название роли минимум 2 символа.' });
+  const description = clip(String(req.body.description || '').trim(), 200);
+
+  return withLock(FILES.roles, async () => {
+    const roles = await readJson(FILES.roles, DEFAULT_ROLES);
+    const id = name.toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '_').replace(/^_|_$/g, '') || 'role_' + Date.now().toString(36);
+    if (roles.some(r => r.id === id)) return res.status(400).json({ message: 'Роль с таким ID уже существует.' });
+    roles.push({ id, name, description, system: false });
+    await writeJson(FILES.roles, roles);
+    auditLog('create-role', 'admin', { id, name });
+    return res.status(201).json({ message: 'Роль создана.', role: roles[roles.length - 1] });
+  });
+});
+
+app.delete('/api/admin/roles/:id', async (req, res) => {
+  const pin = String(req.body.pin || '').trim();
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  return withLock(FILES.roles, async () => {
+    const roles = await readJson(FILES.roles, DEFAULT_ROLES);
+    const idx = roles.findIndex(r => r.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Роль не найдена.' });
+    if (roles[idx].system) return res.status(400).json({ message: 'Системную роль нельзя удалить.' });
+
+    // Check if any user has this role
+    const users = await readJson(FILES.users, []);
+    if (users.some(u => u.role === req.params.id)) return res.status(400).json({ message: 'Роль используется. Сначала измените роль у пользователей.' });
+
+    const removed = roles.splice(idx, 1)[0];
+    await writeJson(FILES.roles, roles);
+    auditLog('delete-role', 'admin', { id: removed.id, name: removed.name });
+    return res.json({ message: 'Роль удалена.' });
+  });
 });
 
 /* ── Admin: CRM config management ── */
@@ -3175,6 +3246,7 @@ fs.mkdir(kbImagesDir, { recursive: true }).catch(() => {});
 
 migrateUsers()
   .then(() => migrateBoards())
+  .then(() => migrateRoles())
   .then(() => migrateTzLinks())
   .then(() => {
     app.listen(port, () => {
