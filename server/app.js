@@ -2887,6 +2887,24 @@ app.post('/api/kb/categories', async (req, res) => {
   });
 });
 
+app.put('/api/kb/categories/reorder', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const ids = req.body.ids;
+  if (!Array.isArray(ids) || !ids.length) return res.status(400).json({ message: 'Передайте массив ids.' });
+
+  return withLock(KB_FILES.categories, async () => {
+    const cats = await readJson(KB_FILES.categories, []);
+    for (let i = 0; i < ids.length; i++) {
+      const cat = cats.find((c) => c.id === ids[i]);
+      if (cat) cat.order = i;
+    }
+    await writeJson(KB_FILES.categories, cats);
+    return res.json({ message: 'Порядок обновлён.' });
+  });
+});
+
 app.put('/api/kb/categories/:id', async (req, res) => {
   const pin = getPin(req);
   if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });

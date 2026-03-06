@@ -4001,6 +4001,19 @@ async function openKbCategoriesManager() {
   await renderKbCategoriesList();
 }
 
+async function saveKbCatOrder() {
+  const ids = [...kbCategoriesList.querySelectorAll('.kb-cat-manage-item')].map(el => el.dataset.catId);
+  try {
+    await api('/api/kb/categories/reorder', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids })
+    });
+  } catch (err) {
+    msg(kbCategoriesMessage, err.message, 'error');
+  }
+}
+
 async function renderKbCategoriesList() {
   try {
     const cats = await api(`/api/kb/categories`);
@@ -4008,20 +4021,69 @@ async function renderKbCategoriesList() {
       kbCategoriesList.innerHTML = '<p class="kb-empty">Нет категорий</p>';
       return;
     }
-    kbCategoriesList.innerHTML = cats.map((c) => `
-      <div class="kb-cat-manage-item" data-cat-id="${esc(c.id)}">
+    kbCategoriesList.innerHTML = cats.map((c, i) => `
+      <div class="kb-cat-manage-item" data-cat-id="${esc(c.id)}" draggable="true">
+        <span class="kb-cat-drag-handle" title="Перетащите для перемещения">⠿</span>
         <span class="kb-cat-manage-icon">${kbIcon(c.icon)}</span>
         <span class="kb-cat-manage-name">${esc(c.name)}</span>
         <span class="kb-cat-manage-count">${c.articleCount}</span>
+        <button class="btn-sm kb-cat-move-btn" data-dir="up" data-cat-id="${esc(c.id)}" title="Вверх" ${i === 0 ? 'disabled' : ''}>↑</button>
+        <button class="btn-sm kb-cat-move-btn" data-dir="down" data-cat-id="${esc(c.id)}" title="Вниз" ${i === cats.length - 1 ? 'disabled' : ''}>↓</button>
         <button class="btn-sm btn-danger-outline-sm kb-cat-delete-btn" data-cat-id="${esc(c.id)}" title="Удалить">&times;</button>
       </div>
     `).join('');
 
-    kbCategoriesList.querySelectorAll('.kb-cat-delete-btn').forEach((btn) => {
-      btn.addEventListener('click', async () => {
+    // Drag-and-drop reorder
+    let _kbDragItem = null;
+    kbCategoriesList.querySelectorAll('.kb-cat-manage-item').forEach((item) => {
+      item.addEventListener('dragstart', (e) => {
+        _kbDragItem = item;
+        item.classList.add('kb-cat-dragging');
+        e.dataTransfer.effectAllowed = 'move';
+      });
+      item.addEventListener('dragend', () => {
+        item.classList.remove('kb-cat-dragging');
+        _kbDragItem = null;
+        kbCategoriesList.querySelectorAll('.kb-cat-manage-item').forEach(el => el.classList.remove('kb-cat-drag-over'));
+        saveKbCatOrder();
+      });
+      item.addEventListener('dragover', (e) => {
+        e.preventDefault();
+        e.dataTransfer.dropEffect = 'move';
+        if (_kbDragItem && _kbDragItem !== item) {
+          item.classList.add('kb-cat-drag-over');
+          const rect = item.getBoundingClientRect();
+          const mid = rect.top + rect.height / 2;
+          if (e.clientY < mid) {
+            kbCategoriesList.insertBefore(_kbDragItem, item);
+          } else {
+            kbCategoriesList.insertBefore(_kbDragItem, item.nextSibling);
+          }
+        }
+      });
+      item.addEventListener('dragleave', () => item.classList.remove('kb-cat-drag-over'));
+    });
+
+    // Up/down buttons
+    kbCategoriesList.addEventListener('click', async (e) => {
+      const moveBtn = e.target.closest('.kb-cat-move-btn');
+      if (moveBtn) {
+        const dir = moveBtn.dataset.dir;
+        const row = moveBtn.closest('.kb-cat-manage-item');
+        if (dir === 'up' && row.previousElementSibling) {
+          kbCategoriesList.insertBefore(row, row.previousElementSibling);
+        } else if (dir === 'down' && row.nextElementSibling) {
+          kbCategoriesList.insertBefore(row.nextElementSibling, row);
+        }
+        await saveKbCatOrder();
+        await renderKbCategoriesList();
+        return;
+      }
+      const delBtn = e.target.closest('.kb-cat-delete-btn');
+      if (delBtn) {
         if (!confirm('Удалить категорию?')) return;
         try {
-          await api(`/api/kb/categories/${btn.dataset.catId}`, {
+          await api(`/api/kb/categories/${delBtn.dataset.catId}`, {
             method: 'DELETE',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ pin: state.pin })
@@ -4030,7 +4092,7 @@ async function renderKbCategoriesList() {
         } catch (err) {
           msg(kbCategoriesMessage, err.message, 'error');
         }
-      });
+      }
     });
   } catch (err) {
     msg(kbCategoriesMessage, err.message, 'error');
