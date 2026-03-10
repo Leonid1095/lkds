@@ -10,6 +10,8 @@ import { promisify } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { createTransport } from 'nodemailer';
 import ExcelJS from 'exceljs';
+import mammoth from 'mammoth';
+import XLSX from 'xlsx';
 import { computeTzFlags as _computeTzFlags, TZ_STATUS_ORD as _TZ_STATUS_ORD, TZ_STATUS_LABELS as _TZ_STATUS_LABELS, TZ_STATUSES as _TZ_STATUSES, TZ_TYPES as _TZ_TYPES, TZ_USER_TYPES as _TZ_USER_TYPES, buildStatusOrd as _buildStatusOrd } from './utils.js';
 
 import { createWriteStream } from 'node:fs';
@@ -2850,21 +2852,133 @@ const kbImageUpload = multer({
 
 const KB_FILES = {
   articles: path.join(dataDir, 'kb-articles.json'),
-  categories: path.join(dataDir, 'kb-categories.json')
+  categories: path.join(dataDir, 'kb-categories.json'),
+  groups: path.join(dataDir, 'kb-groups.json')
 };
+
+// ── KB Access helpers ──
+
+async function getKbUserGroups(userId) {
+  const groups = await readJson(KB_FILES.groups, []);
+  return groups.filter(g => g.members.includes(userId));
+}
+
+function canAccessKbCategory(cat, userId, userGroups, isSA) {
+  if (isSA) return true;
+  if (!cat.group_id) return true; // public category
+  return userGroups.some(g => g.id === cat.group_id);
+}
+
+function canEditKbCategory(cat, userId, userGroups, isSA) {
+  if (isSA) return true;
+  if (!cat.group_id) return false; // public — only superadmin edits
+  return userGroups.some(g => g.id === cat.group_id);
+}
+
+function canAccessKbArticle(article, cat, userId, userGroups, isSA) {
+  if (isSA) return true;
+  if (article.shared_with && article.shared_with.includes(userId)) return true;
+  return canAccessKbCategory(cat, userId, userGroups, isSA);
+}
+
+// ── KB Groups CRUD (superadmin) ──
+
+app.get('/api/kb/groups', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const groups = await readJson(KB_FILES.groups, []);
+  const sa = isSuperAdmin(pin, user);
+  // superadmin sees all, others see only their groups
+  const result = sa ? groups : groups.filter(g => g.members.includes(user.id));
+  // enrich with member names
+  const users = await readJson(FILES.users, []);
+  const enriched = result.map(g => ({
+    ...g,
+    memberNames: g.members.map(mid => {
+      const u = users.find(u => u.id === mid);
+      return u ? { id: u.id, fullName: u.fullName } : { id: mid, fullName: '?' };
+    })
+  }));
+  return res.json(enriched);
+});
+
+app.post('/api/kb/groups', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const name = clip(String(req.body.name || '').trim(), 100);
+  if (name.length < 2) return res.status(400).json({ message: 'Название минимум 2 символа.' });
+  return withLock(KB_FILES.groups, async () => {
+    const groups = await readJson(KB_FILES.groups, []);
+    if (groups.some(g => g.name.toLowerCase() === name.toLowerCase()))
+      return res.status(400).json({ message: 'Группа с таким названием уже существует.' });
+    const group = { id: randomUUID(), name, members: [], created_at: new Date().toISOString() };
+    groups.push(group);
+    await writeJson(KB_FILES.groups, groups);
+    return res.status(201).json({ message: 'Группа создана.', group });
+  });
+});
+
+app.put('/api/kb/groups/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  return withLock(KB_FILES.groups, async () => {
+    const groups = await readJson(KB_FILES.groups, []);
+    const g = groups.find(g => g.id === req.params.id);
+    if (!g) return res.status(404).json({ message: 'Группа не найдена.' });
+    if (req.body.name !== undefined) {
+      const name = clip(String(req.body.name).trim(), 100);
+      if (name.length < 2) return res.status(400).json({ message: 'Название минимум 2 символа.' });
+      g.name = name;
+    }
+    if (Array.isArray(req.body.members)) {
+      g.members = req.body.members;
+    }
+    await writeJson(KB_FILES.groups, groups);
+    return res.json({ message: 'Группа обновлена.', group: g });
+  });
+});
+
+app.delete('/api/kb/groups/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  return withLock(KB_FILES.groups, async () => {
+    const groups = await readJson(KB_FILES.groups, []);
+    const idx = groups.findIndex(g => g.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Группа не найдена.' });
+    groups.splice(idx, 1);
+    await writeJson(KB_FILES.groups, groups);
+    // Clear group_id from categories that reference this group
+    const cats = await readJson(KB_FILES.categories, []);
+    let changed = false;
+    for (const c of cats) {
+      if (c.group_id === req.params.id) { c.group_id = null; changed = true; }
+    }
+    if (changed) await writeJson(KB_FILES.categories, cats);
+    return res.json({ message: 'Группа удалена.' });
+  });
+});
 
 // Categories
 
 app.get('/api/kb/categories', async (req, res) => {
   const pin = getPin(req);
-  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
 
+  const sa = isSuperAdmin(pin, user);
+  const userGroups = await getKbUserGroups(user.id);
   const cats = await readJson(KB_FILES.categories, []);
   const articles = await readJson(KB_FILES.articles, []);
-  const result = cats
+  const visible = cats
+    .filter(c => canAccessKbCategory(c, user.id, userGroups, sa))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
-    .map((c) => ({ ...c, articleCount: articles.filter((a) => a.category_id === c.id).length }));
-  return res.json(result);
+    .map((c) => ({
+      ...c,
+      articleCount: articles.filter((a) => a.category_id === c.id).length,
+      canEdit: canEditKbCategory(c, user.id, userGroups, sa)
+    }));
+  return res.json(visible);
 });
 
 app.post('/api/kb/categories', async (req, res) => {
@@ -2880,7 +2994,13 @@ app.post('/api/kb/categories', async (req, res) => {
     if (cats.some((c) => c.name.toLowerCase() === name.toLowerCase())) {
       return res.status(400).json({ message: 'Категория с таким названием уже существует.' });
     }
-    const cat = { id: randomUUID(), name, icon, order: cats.length };
+    const groupId = req.body.group_id ? String(req.body.group_id).trim() : null;
+    if (groupId) {
+      const groups = await readJson(KB_FILES.groups, []);
+      if (!groups.some(g => g.id === groupId))
+        return res.status(400).json({ message: 'Группа не найдена.' });
+    }
+    const cat = { id: randomUUID(), name, icon, order: cats.length, group_id: groupId };
     cats.push(cat);
     await writeJson(KB_FILES.categories, cats);
     return res.status(201).json({ message: 'Категория создана.', category: cat });
@@ -2925,6 +3045,15 @@ app.put('/api/kb/categories/:id', async (req, res) => {
     }
     if (req.body.icon !== undefined) cat.icon = clip(String(req.body.icon).trim(), 30);
     if (req.body.order !== undefined) cat.order = Number(req.body.order) || 0;
+    if (req.body.group_id !== undefined) {
+      const gid = req.body.group_id ? String(req.body.group_id).trim() : null;
+      if (gid) {
+        const groups = await readJson(KB_FILES.groups, []);
+        if (!groups.some(g => g.id === gid))
+          return res.status(400).json({ message: 'Группа не найдена.' });
+      }
+      cat.group_id = gid;
+    }
 
     await writeJson(KB_FILES.categories, cats);
     return res.json({ message: 'Категория обновлена.', category: cat });
@@ -2954,13 +3083,27 @@ app.delete('/api/kb/categories/:id', async (req, res) => {
 
 app.get('/api/kb/articles', async (req, res) => {
   const pin = getPin(req);
-  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
 
+  const sa = isSuperAdmin(pin, user);
+  const userGroups = await getKbUserGroups(user.id);
+  const cats = await readJson(KB_FILES.categories, []);
   const articles = await readJson(KB_FILES.articles, []);
   const catId = String(req.query.category_id || '').trim();
   const search = String(req.query.search || '').trim().toLowerCase();
 
   let items = articles;
+
+  // Filter by access: user sees articles in accessible categories + shared with them
+  if (!sa) {
+    items = items.filter(a => {
+      const cat = cats.find(c => c.id === a.category_id);
+      if (!cat) return false;
+      return canAccessKbArticle(a, cat, user.id, userGroups, sa);
+    });
+  }
+
   if (catId) items = items.filter((a) => a.category_id === catId);
   if (search) items = items.filter((a) =>
     (a.title && a.title.toLowerCase().includes(search)) ||
@@ -2978,30 +3121,49 @@ app.get('/api/kb/articles', async (req, res) => {
 
 app.get('/api/kb/articles/:id', async (req, res) => {
   const pin = getPin(req);
-  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
 
   const articles = await readJson(KB_FILES.articles, []);
   const article = articles.find((a) => a.id === req.params.id);
   if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
-  return res.json(article);
+
+  const sa = isSuperAdmin(pin, user);
+  const cats = await readJson(KB_FILES.categories, []);
+  const cat = cats.find(c => c.id === article.category_id);
+  const userGroups = await getKbUserGroups(user.id);
+  if (!canAccessKbArticle(article, cat || {}, user.id, userGroups, sa)) {
+    return res.status(403).json({ message: 'Нет доступа к этой статье.' });
+  }
+
+  // Add canEdit flag
+  const canEdit = sa || canEditKbCategory(cat || {}, user.id, userGroups, sa);
+  return res.json({ ...article, canEdit });
 });
 
 app.post('/api/kb/articles', async (req, res) => {
   const pin = getPin(req);
-  const authUser = await requireSuperAdmin(pin);
-  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const sa = isSuperAdmin(pin, user);
+  const categoryId = String(req.body.category_id || '').trim();
+
+  // Check user can edit this category
+  const cats = await readJson(KB_FILES.categories, []);
+  const cat = cats.find(c => c.id === categoryId);
+  if (categoryId && !cat) return res.status(400).json({ message: 'Категория не найдена.' });
+
+  const userGroups = await getKbUserGroups(user.id);
+  if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+    return res.status(403).json({ message: 'Нет прав на создание статей в этой категории.' });
+  }
 
   const title = clip(String(req.body.title || '').trim(), 300);
   if (title.length < 3) return res.status(400).json({ message: 'Название минимум 3 символа.' });
   const content = String(req.body.content || '').trim();
   if (content.length < 10) return res.status(400).json({ message: 'Содержимое слишком короткое.' });
-  const categoryId = String(req.body.category_id || '').trim();
   const pinned = !!req.body.pinned;
-
-  const cats = await readJson(KB_FILES.categories, []);
-  if (categoryId && !cats.some((c) => c.id === categoryId)) {
-    return res.status(400).json({ message: 'Категория не найдена.' });
-  }
 
   return withLock(KB_FILES.articles, async () => {
     const articles = await readJson(KB_FILES.articles, []);
@@ -3011,7 +3173,9 @@ app.post('/api/kb/articles', async (req, res) => {
       content: clip(content, 2000000),
       category_id: categoryId || null,
       pinned,
-      created_by: authUser.fullName || 'superadmin',
+      created_by: user.fullName || 'unknown',
+      created_by_id: user.id,
+      shared_with: [],
       created_at: new Date().toISOString(),
       updated_at: new Date().toISOString()
     };
@@ -3023,13 +3187,23 @@ app.post('/api/kb/articles', async (req, res) => {
 
 app.put('/api/kb/articles/:id', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
 
+  const sa = isSuperAdmin(pin, user);
   const id = req.params.id;
   return withLock(KB_FILES.articles, async () => {
     const articles = await readJson(KB_FILES.articles, []);
     const article = articles.find((a) => a.id === id);
     if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
+
+    // Check permission: superadmin or group member for this category
+    const cats = await readJson(KB_FILES.categories, []);
+    const cat = cats.find(c => c.id === article.category_id);
+    const userGroups = await getKbUserGroups(user.id);
+    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+      return res.status(403).json({ message: 'Нет прав на редактирование.' });
+    }
 
     if (req.body.title !== undefined) {
       const t = clip(String(req.body.title).trim(), 300);
@@ -3042,7 +3216,6 @@ app.put('/api/kb/articles/:id', async (req, res) => {
     if (req.body.category_id !== undefined) {
       const catId = String(req.body.category_id).trim();
       if (catId) {
-        const cats = await readJson(KB_FILES.categories, []);
         if (!cats.some((c) => c.id === catId)) return res.status(400).json({ message: 'Категория не найдена.' });
       }
       article.category_id = catId || null;
@@ -3055,19 +3228,65 @@ app.put('/api/kb/articles/:id', async (req, res) => {
   });
 });
 
+// Share article with specific users
+app.put('/api/kb/articles/:id/share', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const sa = isSuperAdmin(pin, user);
+  return withLock(KB_FILES.articles, async () => {
+    const articles = await readJson(KB_FILES.articles, []);
+    const article = articles.find(a => a.id === req.params.id);
+    if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
+
+    // Only superadmin or group member can share
+    const cats = await readJson(KB_FILES.categories, []);
+    const cat = cats.find(c => c.id === article.category_id);
+    const userGroups = await getKbUserGroups(user.id);
+    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+      return res.status(403).json({ message: 'Нет прав.' });
+    }
+
+    const shared = Array.isArray(req.body.shared_with) ? req.body.shared_with : [];
+    article.shared_with = shared;
+    await writeJson(KB_FILES.articles, articles);
+    return res.json({ message: 'Доступ обновлён.' });
+  });
+});
+
 app.delete('/api/kb/articles/:id', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
 
+  const sa = isSuperAdmin(pin, user);
   const id = req.params.id;
   return withLock(KB_FILES.articles, async () => {
     const articles = await readJson(KB_FILES.articles, []);
     const idx = articles.findIndex((a) => a.id === id);
     if (idx === -1) return res.status(404).json({ message: 'Статья не найдена.' });
+
+    const article = articles[idx];
+    const cats = await readJson(KB_FILES.categories, []);
+    const cat = cats.find(c => c.id === article.category_id);
+    const userGroups = await getKbUserGroups(user.id);
+    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+      return res.status(403).json({ message: 'Нет прав на удаление.' });
+    }
+
     articles.splice(idx, 1);
     await writeJson(KB_FILES.articles, articles);
     return res.json({ message: 'Статья удалена.' });
   });
+});
+
+// KB users list for sharing (any authenticated user gets id+name only)
+app.get('/api/kb/users', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const users = await readJson(FILES.users, []);
+  return res.json(users.map(u => ({ id: u.id, fullName: u.fullName })));
 });
 
 // KB image upload
@@ -3081,7 +3300,14 @@ app.post('/api/kb/upload-image', (req, res) => {
     if (!req.file) return res.status(400).json({ message: 'Файл не выбран.' });
 
     const pin = getPin(req);
-    if (!(await requireSuperAdmin(pin))) {
+    const _imgUser = await getUserByPin(pin);
+    if (!_imgUser) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({ message: 'Нет доступа.' });
+    }
+    const _imgSa = isSuperAdmin(pin, _imgUser);
+    const _imgGrps = await getKbUserGroups(_imgUser.id);
+    if (!_imgSa && !_imgGrps.length) {
       await fs.unlink(req.file.path).catch(() => {});
       return res.status(403).json({ message: 'Нет доступа.' });
     }
@@ -3091,6 +3317,98 @@ app.post('/api/kb/upload-image', (req, res) => {
     const finalPath = path.join(kbImagesDir, finalName);
     await fs.rename(req.file.path, finalPath);
     return res.json({ url: `/api/kb/images/${finalName}` });
+  });
+});
+
+// KB document upload (docx / xlsx → HTML)
+
+const kbDocUpload = multer({
+  storage: kbImageStorage,  // reuse same temp storage
+  limits: { fileSize: 20 * 1024 * 1024 },
+  fileFilter: (_req, file, cb) => {
+    const allowed = [
+      'application/vnd.openxmlformats-officedocument.wordprocessingml.document',  // .docx
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',         // .xlsx
+      'application/vnd.ms-excel',                                                   // .xls
+    ];
+    cb(null, allowed.includes(file.mimetype));
+  }
+}).single('document');
+
+app.post('/api/kb/upload-document', (req, res) => {
+  kbDocUpload(req, res, async (err) => {
+    if (err) {
+      if (err.code === 'LIMIT_FILE_SIZE') return res.status(400).json({ message: 'Файл слишком большой (макс 20 МБ).' });
+      return res.status(400).json({ message: 'Ошибка загрузки файла.' });
+    }
+    if (!req.file) return res.status(400).json({ message: 'Файл не выбран. Поддерживаются .docx и .xlsx' });
+
+    const pin = getPin(req);
+    const _docUser = await getUserByPin(pin);
+    if (!_docUser) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({ message: 'Нет доступа.' });
+    }
+    const _docSa = isSuperAdmin(pin, _docUser);
+    const _docGrps = await getKbUserGroups(_docUser.id);
+    if (!_docSa && !_docGrps.length) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(403).json({ message: 'Нет доступа.' });
+    }
+
+    const ext = path.extname(req.file.originalname).toLowerCase();
+    const originalName = req.file.originalname.replace(/\.[^.]+$/, '');
+
+    try {
+      let html = '';
+
+      if (ext === '.docx') {
+        // Convert Word → HTML with mammoth
+        const result = await mammoth.convertToHtml(
+          { path: req.file.path },
+          {
+            convertImage: mammoth.images.imgElement(async (image) => {
+              // Save embedded images to kb-images
+              const imgBuf = await image.read();
+              const imgExt = image.contentType ? '.' + image.contentType.split('/')[1] : '.png';
+              const imgName = `${randomUUID()}${imgExt}`;
+              await fs.writeFile(path.join(kbImagesDir, imgName), imgBuf);
+              return { src: `/api/kb/images/${imgName}` };
+            })
+          }
+        );
+        html = result.value;
+
+      } else if (ext === '.xlsx' || ext === '.xls') {
+        // Convert Excel → HTML tables
+        const buf = await fs.readFile(req.file.path);
+        const wb = XLSX.read(buf, { type: 'buffer', cellStyles: true });
+        const parts = [];
+        for (const sheetName of wb.SheetNames) {
+          const ws = wb.Sheets[sheetName];
+          if (!ws['!ref']) continue;
+          if (wb.SheetNames.length > 1) {
+            parts.push(`<h2>${sheetName}</h2>`);
+          }
+          const tableHtml = XLSX.utils.sheet_to_html(ws, { id: '', editable: false });
+          // sheet_to_html wraps in <html><body><table>, extract just the table
+          const tableMatch = tableHtml.match(/<table[\s\S]*<\/table>/i);
+          parts.push(tableMatch ? tableMatch[0] : tableHtml);
+        }
+        html = parts.join('\n');
+
+      } else {
+        await fs.unlink(req.file.path).catch(() => {});
+        return res.status(400).json({ message: 'Неподдерживаемый формат. Используйте .docx или .xlsx' });
+      }
+
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.json({ html, title: originalName });
+
+    } catch (convErr) {
+      await fs.unlink(req.file.path).catch(() => {});
+      return res.status(500).json({ message: `Ошибка конвертации: ${convErr.message}` });
+    }
   });
 });
 

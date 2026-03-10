@@ -174,6 +174,9 @@ const kbEditorPinned = $('kbEditorPinned');
 const kbEditorSubmitBtn = $('kbEditorSubmitBtn');
 const kbEditorCancelBtn = $('kbEditorCancelBtn');
 const kbEditorMessage = $('kbEditorMessage');
+const kbDocUploadBtn = $('kbDocUploadBtn');
+const kbDocFileInput = $('kbDocFileInput');
+const kbDocUploadStatus = $('kbDocUploadStatus');
 const kbCategoriesPopup = $('kbCategoriesPopup');
 const kbCategoriesList = $('kbCategoriesList');
 const kbCatNameInput = $('kbCatNameInput');
@@ -3570,6 +3573,7 @@ async function renderKbCategories() {
 
   let toolbarHtml = '<div class="kb-toolbar-row"><h2 class="kb-section-title">База знаний</h2>';
   if (isSuperadmin) {
+    toolbarHtml += '<button class="btn-sm btn-outline-dark" id="kbManageGroupsBtn" type="button" title="Группы доступа"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Группы</button>';
     toolbarHtml += '<button class="kb-gear-btn" id="kbManageCatsBtn" type="button" title="Управление категориями"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/></svg></button>';
   }
   toolbarHtml += '</div><div class="kb-search-row"><input class="kb-search-input" id="kbSearchInput" placeholder="Поиск по статьям..." /></div>';
@@ -3577,6 +3581,7 @@ async function renderKbCategories() {
 
   if (isSuperadmin) {
     document.getElementById('kbManageCatsBtn')?.addEventListener('click', openKbCategoriesManager);
+    document.getElementById('kbManageGroupsBtn')?.addEventListener('click', openKbGroupsManager);
   }
 
   document.getElementById('kbSearchInput')?.addEventListener('input', (e) => {
@@ -3603,6 +3608,7 @@ async function renderKbCategories() {
         <div class="kb-cat-icon">${kbIcon(c.icon)}</div>
         <div class="kb-cat-name">${esc(c.name)}</div>
         <div class="kb-cat-count">${c.articleCount} ${kbPlural(c.articleCount, 'статья', 'статьи', 'статей')}</div>
+        ${c.group_id ? '<div class="kb-cat-group-badge">Ограниченный доступ</div>' : ''}
       </div>
     `).join('') + '</div>';
 
@@ -3654,14 +3660,15 @@ async function renderKbArticles() {
     loadKbView();
   });
 
+  const canEdit = cat && cat.canEdit;
   let toolbarHtml = '<div class="kb-toolbar-row"><h2 class="kb-section-title">' + esc(catName) + '</h2>';
-  if (isSuperadmin) {
+  if (canEdit) {
     toolbarHtml += '<button class="btn-sm btn-primary" id="kbCreateArticleBtn">+ Новая статья</button>';
   }
   toolbarHtml += '</div>';
   kbToolbar.innerHTML = toolbarHtml;
 
-  if (isSuperadmin) {
+  if (canEdit) {
     document.getElementById('kbCreateArticleBtn')?.addEventListener('click', () => openKbEditor(null));
   }
 
@@ -3749,22 +3756,26 @@ async function renderKbArticle() {
       loadKbView();
     });
 
+    const articleCanEdit = article.canEdit;
     let toolbarHtml = '<div class="kb-toolbar-row">';
-    if (isSuperadmin) {
+    if (articleCanEdit) {
       toolbarHtml += `<button class="btn-sm btn-kb-manage" id="kbEditArticleBtn">Редактировать</button>`;
+      toolbarHtml += `<button class="btn-sm btn-outline-dark" id="kbShareArticleBtn">Поделиться</button>`;
       toolbarHtml += `<button class="btn-sm btn-danger-outline-sm" id="kbDeleteArticleBtn">Удалить</button>`;
     }
     toolbarHtml += '</div>';
     kbToolbar.innerHTML = toolbarHtml;
 
+    const sharedCount = (article.shared_with || []).length;
     kbContent.innerHTML = `<article class="kb-article-reader">
       <h1 class="kb-article-title">${esc(article.title)}</h1>
-      <div class="kb-article-meta">${esc(article.created_by)} &middot; ${fmtDate(article.updated_at)}</div>
+      <div class="kb-article-meta">${esc(article.created_by)} &middot; ${fmtDate(article.updated_at)}${sharedCount ? ` &middot; Доступ: ${sharedCount} чел.` : ''}</div>
       <div class="kb-article-body">${typeof DOMPurify !== 'undefined' ? DOMPurify.sanitize(article.content, { ADD_TAGS: ['iframe'], ADD_ATTR: ['target', 'allowfullscreen', 'class'] }) : esc(article.content)}</div>
     </article>`;
 
-    if (isSuperadmin) {
+    if (articleCanEdit) {
       document.getElementById('kbEditArticleBtn')?.addEventListener('click', () => openKbEditor(article));
+      document.getElementById('kbShareArticleBtn')?.addEventListener('click', () => openKbSharePopup(article));
       document.getElementById('kbDeleteArticleBtn')?.addEventListener('click', async () => {
         if (!confirm('Удалить статью?')) return;
         try {
@@ -3993,6 +4004,61 @@ function closeKbEditor() {
 kbEditorCancelBtn.addEventListener('click', closeKbEditor);
 kbEditorPopup.addEventListener('click', (e) => { if (e.target === kbEditorPopup && confirm('Закрыть редактор?')) closeKbEditor(); });
 
+// KB document upload (.docx / .xlsx → HTML)
+kbDocUploadBtn.addEventListener('click', () => kbDocFileInput.click());
+kbDocFileInput.addEventListener('change', async () => {
+  const file = kbDocFileInput.files[0];
+  if (!file) return;
+  kbDocFileInput.value = '';
+
+  const ext = file.name.split('.').pop().toLowerCase();
+  if (!['docx', 'xlsx', 'xls'].includes(ext)) {
+    msg(kbEditorMessage, 'Поддерживаются только .docx и .xlsx файлы', 'error');
+    return;
+  }
+
+  kbDocUploadBtn.disabled = true;
+  kbDocUploadStatus.textContent = 'Конвертация...';
+
+  const fd = new FormData();
+  fd.append('document', file);
+
+  try {
+    const resp = await fetch('/api/kb/upload-document', {
+      method: 'POST',
+      headers: { 'X-Auth-Pin': state.pin },
+      body: fd
+    });
+    const data = await resp.json();
+    if (!resp.ok) throw new Error(data.message || 'Ошибка загрузки');
+
+    const q = state.kbQuill;
+    if (q) {
+      const current = q.root.innerHTML.trim();
+      if (current && current !== '<p><br></p>') {
+        if (!confirm('Заменить текущее содержимое документом?')) {
+          kbDocUploadStatus.textContent = '';
+          return;
+        }
+      }
+      q.root.innerHTML = data.html;
+    }
+
+    // Auto-fill title if empty
+    if (!kbEditorTitleInput.value.trim() && data.title) {
+      kbEditorTitleInput.value = data.title;
+    }
+
+    kbDocUploadStatus.textContent = 'Загружено';
+    setTimeout(() => { kbDocUploadStatus.textContent = ''; }, 3000);
+  } catch (err) {
+    msg(kbEditorMessage, err.message, 'error');
+    kbDocUploadStatus.textContent = '';
+  } finally {
+    kbDocUploadBtn.disabled = false;
+  }
+});
+
 // KB Categories manager
 
 async function openKbCategoriesManager() {
@@ -4017,21 +4083,41 @@ async function saveKbCatOrder() {
 async function renderKbCategoriesList() {
   try {
     const cats = await api(`/api/kb/categories`);
+    const groups = await api(`/api/kb/groups`);
+    state._kbGroups = groups;
     if (!cats.length) {
       kbCategoriesList.innerHTML = '<p class="kb-empty">Нет категорий</p>';
       return;
     }
+    const groupOpts = (catGroupId) => `<option value=""${!catGroupId ? ' selected' : ''}>Все</option>` +
+      groups.map(g => `<option value="${esc(g.id)}"${catGroupId === g.id ? ' selected' : ''}>${esc(g.name)}</option>`).join('');
+
     kbCategoriesList.innerHTML = cats.map((c, i) => `
       <div class="kb-cat-manage-item" data-cat-id="${esc(c.id)}" draggable="true">
         <span class="kb-cat-drag-handle" title="Перетащите для перемещения">⠿</span>
         <span class="kb-cat-manage-icon">${kbIcon(c.icon)}</span>
         <span class="kb-cat-manage-name">${esc(c.name)}</span>
+        <select class="kb-cat-group-select" data-cat-id="${esc(c.id)}" title="Группа доступа">${groupOpts(c.group_id)}</select>
         <span class="kb-cat-manage-count">${c.articleCount}</span>
         <button class="btn-sm kb-cat-move-btn" data-dir="up" data-cat-id="${esc(c.id)}" title="Вверх" ${i === 0 ? 'disabled' : ''}>↑</button>
         <button class="btn-sm kb-cat-move-btn" data-dir="down" data-cat-id="${esc(c.id)}" title="Вниз" ${i === cats.length - 1 ? 'disabled' : ''}>↓</button>
         <button class="btn-sm btn-danger-outline-sm kb-cat-delete-btn" data-cat-id="${esc(c.id)}" title="Удалить">&times;</button>
       </div>
     `).join('');
+
+    // Group change handlers
+    kbCategoriesList.querySelectorAll('.kb-cat-group-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        try {
+          await api(`/api/kb/categories/${sel.dataset.catId}`, {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ group_id: sel.value || null })
+          });
+          showToast('Группа обновлена', 'ok');
+        } catch (err) { msg(kbCategoriesMessage, err.message, 'error'); }
+      });
+    });
 
     // Drag-and-drop reorder
     let _kbDragItem = null;
@@ -4121,6 +4207,176 @@ kbCategoriesCloseBtn.addEventListener('click', () => {
   if (state.kbView === 'categories') loadKbView();
 });
 kbCategoriesPopup.addEventListener('click', (e) => { if (e.target === kbCategoriesPopup) { hide(kbCategoriesPopup); if (state.kbView === 'categories') loadKbView(); } });
+
+/* ── KB Groups Manager (superadmin) ── */
+
+async function openKbGroupsManager() {
+  // Create popup dynamically if not exists
+  let popup = document.getElementById('kbGroupsPopup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'kbGroupsPopup';
+    popup.className = 'popup-overlay hidden';
+    popup.setAttribute('role', 'dialog');
+    popup.innerHTML = `<div class="popup-card fade-in" style="max-width:600px;max-height:90vh;overflow-y:auto">
+      <h3><svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Группы доступа</h3>
+      <div id="kbGroupsList"></div>
+      <div style="display:flex;gap:8px;margin:12px 0">
+        <input id="kbGroupNameInput" placeholder="Название новой группы" style="flex:1" />
+        <button type="button" id="kbGroupAddBtn" class="btn-primary btn-sm">Создать</button>
+      </div>
+      <div class="popup-actions"><button type="button" id="kbGroupsCloseBtn" class="btn-outline-dark">Закрыть</button></div>
+      <p id="kbGroupsMessage" class="message"></p>
+    </div>`;
+    document.body.appendChild(popup);
+
+    popup.addEventListener('click', (e) => { if (e.target === popup) { hide(popup); loadKbView(); } });
+    document.getElementById('kbGroupsCloseBtn').addEventListener('click', () => { hide(popup); loadKbView(); });
+    document.getElementById('kbGroupAddBtn').addEventListener('click', async () => {
+      const name = document.getElementById('kbGroupNameInput').value.trim();
+      if (!name) return;
+      try {
+        await api('/api/kb/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        document.getElementById('kbGroupNameInput').value = '';
+        renderKbGroupsList();
+      } catch (err) { msg(document.getElementById('kbGroupsMessage'), err.message, 'error'); }
+    });
+  }
+
+  show(popup);
+  renderKbGroupsList();
+}
+
+async function renderKbGroupsList() {
+  const list = document.getElementById('kbGroupsList');
+  const msgEl = document.getElementById('kbGroupsMessage');
+  try {
+    const groups = await api('/api/kb/groups');
+    const allUsers = await api('/api/admin/users');
+    const users = allUsers.items || allUsers;
+    if (!groups.length) {
+      list.innerHTML = '<p class="kb-empty">Групп нет</p>';
+      return;
+    }
+    list.innerHTML = groups.map(g => `
+      <div class="kb-group-card" data-group-id="${esc(g.id)}">
+        <div class="kb-group-header">
+          <strong>${esc(g.name)}</strong>
+          <button class="btn-sm btn-danger-outline-sm kb-group-del" data-gid="${esc(g.id)}">&times;</button>
+        </div>
+        <div class="kb-group-members">
+          ${(g.memberNames || []).map(m => `<span class="kb-group-member-chip">${esc(m.fullName)} <button class="kb-group-member-rm" data-gid="${esc(g.id)}" data-uid="${esc(m.id)}">&times;</button></span>`).join('')}
+        </div>
+        <div class="kb-group-add-member">
+          <select class="kb-group-user-select" data-gid="${esc(g.id)}">
+            <option value="">+ Добавить участника...</option>
+            ${users.filter(u => !(g.members || []).includes(u.id)).map(u => `<option value="${esc(u.id)}">${esc(u.fullName)}</option>`).join('')}
+          </select>
+        </div>
+      </div>
+    `).join('');
+
+    // Delete group
+    list.querySelectorAll('.kb-group-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Удалить группу? Категории станут публичными.')) return;
+        try {
+          await api(`/api/kb/groups/${btn.dataset.gid}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+          renderKbGroupsList();
+        } catch (err) { msg(msgEl, err.message, 'error'); }
+      });
+    });
+
+    // Remove member
+    list.querySelectorAll('.kb-group-member-rm').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const gid = btn.dataset.gid;
+        const uid = btn.dataset.uid;
+        const g = groups.find(x => x.id === gid);
+        if (!g) return;
+        const newMembers = (g.members || []).filter(m => m !== uid);
+        try {
+          await api(`/api/kb/groups/${gid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members: newMembers }) });
+          renderKbGroupsList();
+        } catch (err) { msg(msgEl, err.message, 'error'); }
+      });
+    });
+
+    // Add member
+    list.querySelectorAll('.kb-group-user-select').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        if (!sel.value) return;
+        const gid = sel.dataset.gid;
+        const g = groups.find(x => x.id === gid);
+        if (!g) return;
+        const newMembers = [...(g.members || []), sel.value];
+        try {
+          await api(`/api/kb/groups/${gid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members: newMembers }) });
+          renderKbGroupsList();
+        } catch (err) { msg(msgEl, err.message, 'error'); }
+      });
+    });
+  } catch (err) { msg(msgEl, err.message, 'error'); }
+}
+
+/* ── KB Share popup ── */
+
+async function openKbSharePopup(article) {
+  let popup = document.getElementById('kbSharePopup');
+  if (!popup) {
+    popup = document.createElement('div');
+    popup.id = 'kbSharePopup';
+    popup.className = 'popup-overlay hidden';
+    popup.setAttribute('role', 'dialog');
+    popup.innerHTML = `<div class="popup-card fade-in" style="max-width:480px;max-height:80vh;overflow-y:auto">
+      <h3>Поделиться статьёй</h3>
+      <p style="font-size:13px;color:var(--text-sec)">Выберите пользователей, которые получат доступ к этой статье вне группы</p>
+      <div id="kbShareUserList" style="max-height:300px;overflow-y:auto;margin:12px 0"></div>
+      <div class="popup-actions">
+        <button type="button" id="kbShareSaveBtn" class="btn-primary btn-sm">Сохранить</button>
+        <button type="button" id="kbShareCloseBtn" class="btn-outline-dark btn-sm">Закрыть</button>
+      </div>
+      <p id="kbShareMessage" class="message"></p>
+    </div>`;
+    document.body.appendChild(popup);
+    popup.addEventListener('click', (e) => { if (e.target === popup) hide(popup); });
+    document.getElementById('kbShareCloseBtn').addEventListener('click', () => hide(popup));
+  }
+
+  show(popup);
+  const listEl = document.getElementById('kbShareUserList');
+  const msgEl = document.getElementById('kbShareMessage');
+  msg(msgEl, '');
+
+  try {
+    const users = await api('/api/kb/users');
+    const shared = new Set(article.shared_with || []);
+
+    listEl.innerHTML = users.map(u => `
+      <label style="display:flex;align-items:center;gap:8px;padding:6px 8px;cursor:pointer;border-bottom:1px solid var(--border)">
+        <input type="checkbox" value="${esc(u.id)}" ${shared.has(u.id) ? 'checked' : ''} style="width:18px;height:18px;accent-color:var(--accent)" />
+        <span>${esc(u.fullName)}</span>
+      </label>
+    `).join('');
+
+    const saveBtn = document.getElementById('kbShareSaveBtn');
+    saveBtn.onclick = async () => {
+      const selected = [...listEl.querySelectorAll('input[type="checkbox"]:checked')].map(cb => cb.value);
+      try {
+        await api(`/api/kb/articles/${article.id}/share`, {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ shared_with: selected })
+        });
+        showToast('Доступ обновлён', 'ok');
+        hide(popup);
+        loadKbView();
+      } catch (err) { msg(msgEl, err.message, 'error'); }
+    };
+  } catch (err) {
+    msg(msgEl, err.message, 'error');
+  }
+}
 
 /* ── TZ Templates ── */
 
