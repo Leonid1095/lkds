@@ -6,12 +6,6 @@
     "system": true
   },
   {
-    "id": "it_admin",
-    "name": "ИТ-админ",
-    "description": "Доступ к ИТ-заявкам",
-    "system": true
-  },
-  {
     "id": "employee",
     "name": "Сотрудник",
     "description": "Базовый доступ",

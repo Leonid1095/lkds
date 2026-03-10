@@ -46,7 +46,6 @@ const app = express();
 app.set('trust proxy', 1);
 const port = Number(process.env.PORT) || 3000;
 const publicBaseUrl = process.env.PUBLIC_BASE_URL || 'https://lkds-room.duckdns.org';
-const IT_API_URL = process.env.IT_API_URL || '';
 const SUGGESTION_EMAIL = 'ymerchii@yandex.ru';
 
 const ADMIN_PINS = new Set(
@@ -60,7 +59,6 @@ const FILES = {
   users: path.join(dataDir, 'users.json'),
   tickets: path.join(dataDir, 'tickets.json'),
   crmConfig: path.join(dataDir, 'crm-config.json'),
-  itTickets: path.join(dataDir, 'it-tickets.json'),
   suggestions: path.join(dataDir, 'suggestions.json'),
   pinRequests: path.join(dataDir, 'pin-requests.json'),
   tz: path.join(dataDir, 'tz.json'),
@@ -70,7 +68,13 @@ const FILES = {
   tzComments: path.join(dataDir, 'tz-comments.json'),
   tzTemplates: path.join(dataDir, 'tz-templates.json'),
   auditLog: path.join(dataDir, 'audit-log.json'),
-  roles: path.join(dataDir, 'roles.json')
+  roles: path.join(dataDir, 'roles.json'),
+  permissions: path.join(dataDir, 'permissions.json'),
+  kbGroups: path.join(dataDir, 'kb-groups.json'),
+  notifications: path.join(dataDir, 'notifications.json'),
+  kbHistory: path.join(dataDir, 'kb-history.json'),
+  tasks: path.join(dataDir, 'tasks.json'),
+  kbTemplates: path.join(dataDir, 'kb-templates.json')
 };
 
 /* ── Security middleware ── */
@@ -127,12 +131,12 @@ const userActionLimiter = rateLimit({
 app.use('/api/tz', userActionLimiter);
 app.use('/api/bookings', userActionLimiter);
 app.use('/api/tickets', userActionLimiter);
-app.use('/api/it-tickets', userActionLimiter);
 app.use('/api/suggestions', userActionLimiter);
 app.use('/api/profile', userActionLimiter);
 app.use('/api/search', userActionLimiter);
 app.use('/api/kb', userActionLimiter);
 app.use('/api/team', userActionLimiter);
+app.use('/api/tasks', userActionLimiter);
 
 const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
@@ -154,8 +158,6 @@ function escHtml(s) {
 const TG_TOKEN = process.env.TG_BOT_TOKEN || '';
 const TG_ADMIN_IDS = (process.env.TG_ADMIN_IDS || '')
   .split(',').map((s) => s.trim()).filter(Boolean);
-const TG_IT_ADMIN_IDS = (process.env.TG_IT_ADMIN_IDS || '')
-  .split(',').map((s) => s.trim()).filter(Boolean);
 
 async function tgSend(chatId, text) {
   if (!TG_TOKEN) return;
@@ -172,10 +174,6 @@ async function tgSend(chatId, text) {
 
 function tgNotifyAdmins(text) {
   for (const id of TG_ADMIN_IDS) tgSend(id, text);
-}
-
-function tgNotifyItAdmins(text) {
-  for (const id of TG_IT_ADMIN_IDS) tgSend(id, text);
 }
 
 /* ── Email ── */
@@ -314,54 +312,6 @@ async function getCrmConfig() {
   return { ..._DEFAULT_CRM_CONFIG };
 }
 
-/* ── IT Tickets config ── */
-
-const IT_CONFIG = {
-  categories: [
-    {
-      id: 'software', emoji: '\uD83E\uDDE9', label: 'ПО/установка',
-      subcategories: [
-        'Установить/обновить программу',
-        'Лицензия/активация',
-        'Ошибка/вылетает',
-        'Печать/принтер'
-      ]
-    },
-    {
-      id: 'hardware', emoji: '\uD83D\uDCBB', label: 'Компьютер/ноутбук',
-      subcategories: [
-        'Тормозит/зависает',
-        'Не включается',
-        'Клавиатура/мышь/монитор'
-      ]
-    },
-    {
-      id: 'network', emoji: '\uD83C\uDF10', label: 'Интернет/сеть',
-      subcategories: [
-        'Wi-Fi не работает',
-        'Нет интернета',
-        'Низкая скорость'
-      ]
-    },
-    {
-      id: 'vks', emoji: '\uD83D\uDCF9', label: 'ВКС/Презентация',
-      disabled: true, subcategories: []
-    },
-    {
-      id: 'other', emoji: '\uD83D\uDD27', label: 'Другое',
-      subcategories: []
-    }
-  ],
-  locations: [
-    'Модуль ЖД',
-    'Модуль КП',
-    'Офис 2 этаж',
-    'Диспетчерская',
-    'Диспетчеры и операторы КП',
-    'Приемосдатчик'
-  ]
-};
-
 /* ── Multer for avatars ── */
 
 const avatarStorage = multer.diskStorage({
@@ -386,7 +336,7 @@ app.use((req, res, next) => {
     if (!origin) {
       return res.status(403).json({ message: 'Запрос заблокирован (отсутствует origin).' });
     }
-    const allowed = [publicBaseUrl, `http://localhost:${port}`, `https://localhost:${port}`];
+    const allowed = [publicBaseUrl, 'https://lkds-room.duckdns.org', `http://localhost:${port}`, `https://localhost:${port}`];
     const originHost = origin.replace(/\/+$/, '').split('/').slice(0, 3).join('/');
     if (!allowed.includes(originHost)) {
       return res.status(403).json({ message: 'Запрос заблокирован (origin).' });
@@ -589,8 +539,8 @@ async function migrateBoards() {
 
 const DEFAULT_ROLES = [
   { id: 'superadmin', name: 'Суперадмин', description: 'Полный доступ ко всем разделам', system: true },
-  { id: 'it_admin', name: 'ИТ-админ', description: 'Доступ к ИТ-заявкам', system: true },
-  { id: 'employee', name: 'Сотрудник', description: 'Базовый доступ', system: true }
+  { id: 'employee', name: 'Сотрудник', description: 'Базовый доступ', system: true },
+  { id: 'viewer', name: 'Наблюдатель', description: 'Только просмотр', system: true }
 ];
 
 async function migrateRoles() {
@@ -599,6 +549,31 @@ async function migrateRoles() {
     roles = DEFAULT_ROLES;
     await writeJson(FILES.roles, roles);
     console.log('[migrate] roles.json created with default roles');
+  }
+  // Remove deprecated it_admin role if present
+  if (roles.some(r => r.id === 'it_admin')) {
+    const updated = roles.filter(r => r.id !== 'it_admin');
+    await writeJson(FILES.roles, updated);
+    console.log('[migrate] removed deprecated it_admin role');
+  }
+  // Ensure permissions.json exists with default structure
+  let perms = await readJson(FILES.permissions, null);
+  if (!perms) {
+    perms = {
+      roles: [
+        { id: 'superadmin', name: 'Суперадмин', description: 'Полный доступ ко всем разделам', system: true, permissions: { admin_sections: '*', boards: '*', kb_categories: '*', features: '*' } },
+        { id: 'employee', name: 'Сотрудник', description: 'Базовый доступ', system: true, permissions: { admin_sections: [], boards: [], kb_categories: [], features: [] } }
+      ],
+      groups: []
+    };
+    await writeJson(FILES.permissions, perms);
+    console.log('[migrate] permissions.json created with defaults');
+  }
+  // Ensure viewer role exists in permissions
+  if (!perms.roles.some(r => r.id === 'viewer')) {
+    perms.roles.push({ id: 'viewer', name: 'Наблюдатель', description: 'Только просмотр', system: true, permissions: { admin_sections: [], boards: [], kb_categories: [], features: [] } });
+    await writeJson(FILES.permissions, perms);
+    console.log('[migrate] added viewer role to permissions');
   }
 }
 
@@ -714,6 +689,94 @@ function getUserRole(pin, user) {
 function isAdmin(pin, user) { return !!getUserRole(pin, user); }
 function isSuperAdmin(pin, user) { return getUserRole(pin, user) === 'superadmin'; }
 
+/* ── Unified permission resolution ── */
+
+async function getUserPermissions(pin) {
+  const user = await getUserByPin(pin);
+  if (!user) return null;
+
+  // Superadmin override via env
+  if (ADMIN_PINS.has(pin)) {
+    return { user, role: 'superadmin', isSuperAdmin: true, permissions: { admin_sections: '*', boards: '*', kb_categories: '*', features: '*' }, groups: [] };
+  }
+
+  const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+  const userRole = user.role || 'employee';
+  const roleDef = permsData.roles.find(r => r.id === userRole);
+  const userGroups = permsData.groups.filter(g => (g.members || []).includes(user.id));
+
+  // Start with role permissions
+  const rp = roleDef?.permissions || {};
+  const effective = {
+    admin_sections: rp.admin_sections === '*' ? '*' : new Set(rp.admin_sections || []),
+    boards: rp.boards === '*' ? '*' : new Set(rp.boards || []),
+    kb_categories: rp.kb_categories === '*' ? '*' : new Set(rp.kb_categories || []),
+    features: rp.features === '*' ? '*' : new Set(rp.features || [])
+  };
+
+  // Merge group permissions
+  for (const g of userGroups) {
+    const gp = g.permissions || {};
+    if (effective.admin_sections !== '*') (gp.admin_sections || []).forEach(s => effective.admin_sections.add(s));
+    if (effective.boards !== '*') (gp.boards || []).forEach(b => effective.boards.add(b));
+    if (effective.kb_categories !== '*') (gp.kb_categories || []).forEach(c => effective.kb_categories.add(c));
+    if (effective.features !== '*') (gp.features || []).forEach(f => effective.features.add(f));
+  }
+
+  return {
+    user,
+    role: userRole,
+    isSuperAdmin: userRole === 'superadmin' || (user.isAdmin === true),
+    permissions: {
+      admin_sections: effective.admin_sections === '*' ? '*' : [...effective.admin_sections],
+      boards: effective.boards === '*' ? '*' : [...effective.boards],
+      kb_categories: effective.kb_categories === '*' ? '*' : [...effective.kb_categories],
+      features: effective.features === '*' ? '*' : [...effective.features]
+    },
+    groups: userGroups.map(g => ({ id: g.id, name: g.name }))
+  };
+}
+
+// Helper to check specific permission
+function hasPermission(perms, category, id) {
+  if (!perms) return false;
+  const val = perms[category];
+  if (val === '*') return true;
+  if (Array.isArray(val)) return val.includes(id);
+  return false;
+}
+
+/* ── In-app Notifications ── */
+
+async function createNotification(userId, type, title, body, link) {
+  if (!userId) return;
+  const notifs = await readJson(FILES.notifications, []);
+  notifs.push({
+    id: randomUUID(),
+    user_id: userId,
+    type,
+    title: clip(String(title), 200),
+    body: clip(String(body), 500),
+    link: link || '',
+    read: false,
+    created_at: new Date().toISOString()
+  });
+  // Keep max 500 notifications per user, trim oldest
+  const userNotifs = notifs.filter(n => n.user_id === userId);
+  if (userNotifs.length > 500) {
+    const oldest = userNotifs.sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+    const idx = notifs.findIndex(n => n.id === oldest.id);
+    if (idx !== -1) notifs.splice(idx, 1);
+  }
+  await writeJson(FILES.notifications, notifs);
+}
+
+async function notifyUsers(userIds, type, title, body, link) {
+  for (const uid of userIds) {
+    await createNotification(uid, type, title, body, link);
+  }
+}
+
 /* ── Auth ── */
 
 app.post('/api/auth/register', registerLimiter, async (req, res) => {
@@ -751,12 +814,14 @@ app.post('/api/auth/login', loginLimiter, async (req, res) => {
   if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
 
   const adminRole = getUserRole(pin, user);
+  const perms = await getUserPermissions(pin);
   return res.json({
     fullName: user.fullName, contact: user.contact,
     position: user.position || '', userId: user.id,
     avatar: user.avatar || '', admin: !!adminRole, adminRole: adminRole || null,
     workLocation: user.workLocation || '', workDesk: user.workDesk || '',
-    tgChatId: user.tgChatId || ''
+    tgChatId: user.tgChatId || '',
+    permissions: perms?.permissions || null
   });
 });
 
@@ -793,10 +858,6 @@ app.get('/api/settings', (_req, res) => {
 
 app.get('/api/crm-config', async (_req, res) => {
   res.json(await getCrmConfig());
-});
-
-app.get('/api/it-config', (_req, res) => {
-  res.json(IT_CONFIG);
 });
 
 /* ── Rooms & Links ── */
@@ -907,6 +968,49 @@ app.get('/api/avatars/:filename', async (req, res) => {
   } catch {
     res.status(404).json({ message: 'Фото не найдено.' });
   }
+});
+
+/* ── Notifications API ── */
+
+app.get('/api/notifications', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const notifs = await readJson(FILES.notifications, []);
+  const mine = notifs
+    .filter(n => n.user_id === user.id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .slice(0, 50);
+  return res.json(mine);
+});
+
+app.get('/api/notifications/unread-count', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const notifs = await readJson(FILES.notifications, []);
+  const count = notifs.filter(n => n.user_id === user.id && !n.read).length;
+  return res.json({ count });
+});
+
+app.post('/api/notifications/read', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const { ids } = req.body;  // array of notification IDs, or 'all'
+  return withLock(FILES.notifications, async () => {
+    const notifs = await readJson(FILES.notifications, []);
+    if (ids === 'all') {
+      notifs.filter(n => n.user_id === user.id).forEach(n => { n.read = true; });
+    } else if (Array.isArray(ids)) {
+      for (const id of ids) {
+        const n = notifs.find(n => n.id === id && n.user_id === user.id);
+        if (n) n.read = true;
+      }
+    }
+    await writeJson(FILES.notifications, notifs);
+    return res.json({ message: 'OK' });
+  });
 });
 
 /* ── Bookings ── */
@@ -1078,194 +1182,6 @@ app.post('/api/tickets', async (req, res) => {
   return res.status(201).json({ message: `${labelRu} принята. Спасибо!`, id: ticket.id });
 });
 
-/* ── IT Tickets ── */
-
-app.post('/api/it-tickets', async (req, res) => {
-  const pin = getPin(req);
-  const category = String(req.body.category || '').trim();
-  const subcategory = String(req.body.subcategory || '').trim();
-  const location = String(req.body.location || '').trim();
-  const seat = String(req.body.seat || '').trim();
-  const description = clip(String(req.body.description || '').trim(), 2000);
-
-  const user = await getUserByPin(pin);
-  if (!user) return res.status(401).json({ message: 'Неверный пин-код. Войдите заново.' });
-
-  const cat = IT_CONFIG.categories.find((c) => c.id === category);
-  if (!cat) return res.status(400).json({ message: 'Выберите категорию.' });
-  if (cat.disabled) return res.status(400).json({ message: 'Эта категория пока недоступна.' });
-  if (category !== 'other' && cat.subcategories.length && !cat.subcategories.includes(subcategory))
-    return res.status(400).json({ message: 'Выберите тип проблемы.' });
-  if (!IT_CONFIG.locations.includes(location))
-    return res.status(400).json({ message: 'Выберите локацию.' });
-  if (location === 'Офис 2 этаж') {
-    const seatNum = Number(seat);
-    if (!seat || isNaN(seatNum) || seatNum < 1 || seatNum > 260)
-      return res.status(400).json({ message: 'Укажите номер места (1–260).' });
-  }
-
-  const tickets = await readJson(FILES.itTickets, []);
-
-  // Защита от дубликатов: тот же пользователь + та же категория за 30 секунд
-  const now = new Date();
-  const dup = tickets.find(t =>
-    t.pin === pin && t.category === cat.label && t.description === (description || '—') &&
-    (now - new Date(t.createdAt)) < 30000
-  );
-  if (dup) return res.status(409).json({ message: 'Заявка уже отправлена. Подождите перед повторной отправкой.' });
-
-  const ticket = {
-    id: randomUUID(), pin, category: cat.label,
-    subcategory: category === 'other' ? (description || '—') : (subcategory || '—'),
-    location, seat: location === 'Офис 2 этаж' ? seat : '',
-    description: description || '—',
-    fullName: user.fullName, contact: user.contact,
-    status: 'new', statusUpdatedAt: null, takenBy: null,
-    rating: null, ratingComment: null, forwardedToApi: false,
-    createdAt: now.toISOString()
-  };
-  tickets.push(ticket);
-  await writeJson(FILES.itTickets, tickets);
-
-  // Fire & forget forward to external IT API
-  if (IT_API_URL) {
-    fetch(IT_API_URL, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        id: ticket.id, category: ticket.category, subcategory: ticket.subcategory,
-        location: ticket.location, seat: ticket.seat, description: ticket.description,
-        fullName: ticket.fullName, contact: ticket.contact, createdAt: ticket.createdAt
-      })
-    }).then(async (resp) => {
-      if (resp.ok) {
-        const all = await readJson(FILES.itTickets, []);
-        const t = all.find((x) => x.id === ticket.id);
-        if (t) { t.forwardedToApi = true; await writeJson(FILES.itTickets, all); }
-      }
-    }).catch((err) => console.error('IT API forward failed:', err.message));
-  }
-
-  tgNotifyItAdmins(
-    `🔧 <b>ИТ-заявка</b>\n` +
-    `Категория: ${cat.emoji} ${escHtml(cat.label)}\n` +
-    (category !== 'other' && subcategory ? `Тип: ${escHtml(subcategory)}\n` : '') +
-    `Локация: ${escHtml(location)}${location === 'Офис 2 этаж' && seat ? ` (место ${escHtml(seat)})` : ''}\n` +
-    `Описание: ${escHtml(ticket.description)}\n` +
-    `От: ${escHtml(user.fullName)} (${escHtml(user.contact)})\n\n` +
-    `🔗 <a href="${publicBaseUrl}/it-status/${ticket.id}">Взять / Обновить статус</a>`
-  );
-
-  return res.status(201).json({ message: 'ИТ-заявка отправлена. Спасибо!', id: ticket.id });
-});
-
-/* ── IT Ticket status & rating ── */
-
-app.get('/api/it-ticket-status/:id', async (req, res) => {
-  const id = req.params.id;
-  if (!/^[0-9a-f-]{36}$/.test(id))
-    return res.status(400).json({ message: 'Неверный ID заявки.' });
-
-  const tickets = await readJson(FILES.itTickets, []);
-  const ticket = tickets.find((t) => t.id === id);
-  if (!ticket) return res.status(404).json({ message: 'Заявка не найдена.' });
-
-  return res.json({
-    id: ticket.id, category: ticket.category, subcategory: ticket.subcategory,
-    location: ticket.location, seat: ticket.seat, description: ticket.description,
-    fullName: ticket.fullName, contact: ticket.contact,
-    status: ticket.status, statusUpdatedAt: ticket.statusUpdatedAt,
-    takenBy: ticket.takenBy, rating: ticket.rating, ratingComment: ticket.ratingComment,
-    createdAt: ticket.createdAt
-  });
-});
-
-app.post('/api/it-ticket-status/:id', async (req, res) => {
-  const id = req.params.id;
-  if (!/^[0-9a-f-]{36}$/.test(id))
-    return res.status(400).json({ message: 'Неверный ID заявки.' });
-
-  const action = String(req.body.action || '').trim();
-  const takenBy = clip(String(req.body.takenBy || '').trim(), 100);
-
-  return withLock(FILES.itTickets, async () => {
-    const tickets = await readJson(FILES.itTickets, []);
-    const ticket = tickets.find((t) => t.id === id);
-    if (!ticket) return res.status(404).json({ message: 'Заявка не найдена.' });
-
-    if (action === 'take') {
-      if (ticket.status !== 'new')
-        return res.status(400).json({ message: 'Заявку уже взяли в работу.' });
-      ticket.status = 'in_progress';
-      ticket.takenBy = takenBy || 'Сисадмин';
-      ticket.statusUpdatedAt = new Date().toISOString();
-    } else if (action === 'done') {
-      if (ticket.status !== 'in_progress')
-        return res.status(400).json({ message: 'Заявка не в работе.' });
-      ticket.status = 'done';
-      ticket.statusUpdatedAt = new Date().toISOString();
-    } else {
-      return res.status(400).json({ message: 'Действие: take или done.' });
-    }
-
-    await writeJson(FILES.itTickets, tickets);
-    return res.json({ message: 'Статус обновлён.', status: ticket.status });
-  });
-});
-
-app.post('/api/my-it-tickets', async (req, res) => {
-  const pin = getPin(req);
-  if (!/^\d{4}$/.test(pin))
-    return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
-
-  const user = await getUserByPin(pin);
-  if (!user) return res.status(401).json({ message: 'Неверный пин-код.' });
-
-  const tickets = await readJson(FILES.itTickets, []);
-  const my = tickets.filter((t) => t.pin === pin).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-
-  return res.json(my.map((t) => ({
-    id: t.id, category: t.category, subcategory: t.subcategory,
-    location: t.location, description: t.description,
-    status: t.status, statusUpdatedAt: t.statusUpdatedAt,
-    takenBy: t.takenBy, rating: t.rating, ratingComment: t.ratingComment,
-    createdAt: t.createdAt
-  })));
-});
-
-app.post('/api/it-ticket-rate', async (req, res) => {
-  const pin = getPin(req);
-  const ticketId = String(req.body.ticketId || '').trim();
-  const rating = Number(req.body.rating);
-  const ratingComment = clip(String(req.body.ratingComment || '').trim(), 500);
-
-  if (!/^\d{4}$/.test(pin))
-    return res.status(400).json({ message: 'Пин-код должен быть из 4 цифр.' });
-  if (!ticketId) return res.status(400).json({ message: 'Укажите ID заявки.' });
-  if (!Number.isInteger(rating) || rating < 1 || rating > 5)
-    return res.status(400).json({ message: 'Оценка от 1 до 5.' });
-
-  const rater = await getUserByPin(pin);
-  if (!rater) return res.status(401).json({ message: 'Неверный пин-код.' });
-
-  return withLock(FILES.itTickets, async () => {
-    const tickets = await readJson(FILES.itTickets, []);
-    const ticket = tickets.find((t) => t.id === ticketId);
-    if (!ticket) return res.status(404).json({ message: 'Заявка не найдена.' });
-    if (ticket.pin !== pin)
-      return res.status(403).json({ message: 'Можно оценить только свою заявку.' });
-    if (ticket.status !== 'done')
-      return res.status(400).json({ message: 'Оценить можно только выполненную заявку.' });
-    if (ticket.rating !== null)
-      return res.status(400).json({ message: 'Вы уже оценили эту заявку.' });
-
-    ticket.rating = rating;
-    ticket.ratingComment = ratingComment || null;
-    await writeJson(FILES.itTickets, tickets);
-    return res.json({ message: 'Спасибо за оценку!' });
-  });
-});
-
 /* ── Suggestions ── */
 
 app.post('/api/suggestions', async (req, res) => {
@@ -1302,21 +1218,44 @@ async function requireAdmin(pin) {
   return user;
 }
 
-/** Check board access: 'all' = any authed user, 'admins' = admin+, 'superadmin' = superadmin only */
-/** Check board access: 'all', 'admins', 'superadmin', or specific role id (e.g. 'it_admin') */
-async function requireBoardAccess(pin, board) {
-  const access = board?.access || 'superadmin';
-  if (access === 'all') {
-    const user = await getUserByPin(pin);
-    return user || null;
-  }
-  if (access === 'admins') return requireAdmin(pin);
-  if (access === 'superadmin') return requireSuperAdmin(pin);
-  // Specific role: check if user has this role or is superadmin
+/** Check access to admin section by unified permissions */
+async function requireAdminSection(pin, sectionId) {
   const user = await getUserByPin(pin);
   if (!user) return null;
+  if (isSuperAdmin(pin, user)) return user;
+  const perms = await getUserPermissions(pin);
+  if (perms && hasPermission(perms.permissions, 'admin_sections', sectionId)) return user;
+  return null;
+}
+
+/** Check if user has a specific feature permission */
+async function requireFeature(pin, featureId) {
+  const user = await getUserByPin(pin);
+  if (!user) return null;
+  if (isSuperAdmin(pin, user)) return user;
+  const perms = await getUserPermissions(pin);
+  if (perms && hasPermission(perms.permissions, 'features', featureId)) return user;
+  return null;
+}
+
+/** Check board access: 'all' = any authed user, 'admins' = admin+, 'superadmin' = superadmin only, or specific role id */
+async function requireBoardAccess(pin, board) {
+  const user = await getUserByPin(pin);
+  if (!user) return null;
+  if (isSuperAdmin(pin, user)) return user;
+
+  // New: check unified permissions
+  const perms = await getUserPermissions(pin);
+  if (perms && hasPermission(perms.permissions, 'boards', board?.id)) return user;
+
+  // Legacy fallback
+  const access = board?.access || 'superadmin';
+  if (access === 'all') return user;
+  if (access === 'admins' && isAdmin(pin, user)) return user;
+  if (access === 'superadmin') return null;
   const userRole = getUserRole(pin, user);
-  if (userRole === 'superadmin' || userRole === access) return user;
+  if (access === userRole) return user;
+
   return null;
 }
 
@@ -1328,10 +1267,10 @@ function paginate(items, page, pageSize) {
   return { items: items.slice(start, start + ps), total, page: p, pageSize: ps };
 }
 
-// superadmin-only endpoints
+// admin endpoints — access controlled via unified permissions
 app.post('/api/admin/bookings', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'bookings'))) return res.status(403).json({ message: 'Нет доступа.' });
   const { page, pageSize } = req.body;
   const all = (await readJson(FILES.bookings, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return res.json(paginate(all, page, pageSize));
@@ -1339,24 +1278,15 @@ app.post('/api/admin/bookings', async (req, res) => {
 
 app.post('/api/admin/tickets', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'tickets'))) return res.status(403).json({ message: 'Нет доступа.' });
   const { page, pageSize } = req.body;
   const all = (await readJson(FILES.tickets, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return res.json(paginate(all, page, pageSize));
 });
 
-// IT tickets — accessible by both superadmin and it_admin
-app.post('/api/admin/it-tickets', async (req, res) => {
-  const pin = getPin(req);
-  if (!(await requireAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
-  const { page, pageSize } = req.body;
-  const all = (await readJson(FILES.itTickets, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
-  return res.json(paginate(all, page, pageSize));
-});
-
 app.post('/api/admin/suggestions', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'suggestions'))) return res.status(403).json({ message: 'Нет доступа.' });
   const { page, pageSize } = req.body;
   const all = (await readJson(FILES.suggestions, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return res.json(paginate(all, page, pageSize));
@@ -1364,7 +1294,7 @@ app.post('/api/admin/suggestions', async (req, res) => {
 
 app.post('/api/admin/pin-requests', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'pin-requests'))) return res.status(403).json({ message: 'Нет доступа.' });
   const { page, pageSize } = req.body;
   const all = (await readJson(FILES.pinRequests, [])).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return res.json(paginate(all, page, pageSize));
@@ -1373,7 +1303,7 @@ app.post('/api/admin/pin-requests', async (req, res) => {
 app.post('/api/admin/pin-request-resolve', async (req, res) => {
   const pin = getPin(req);
   const requestId = String(req.body.requestId || '').trim();
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'pin-requests'))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const requests = await readJson(FILES.pinRequests, []);
   const idx = requests.findIndex((r) => r.id === requestId);
@@ -1386,7 +1316,7 @@ app.post('/api/admin/pin-request-resolve', async (req, res) => {
 
 app.post('/api/admin/users', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'users'))) return res.status(403).json({ message: 'Нет доступа.' });
   const { page, pageSize } = req.body;
   const users = await readJson(FILES.users, []);
   const list = users.map((u) => {
@@ -1407,7 +1337,7 @@ app.post('/api/admin/update-user', async (req, res) => {
   const contact = clip(String(req.body.contact || '').trim(), 200);
   const newPin = String(req.body.newPin || '').trim();
 
-  const authUser = await requireSuperAdmin(pin);
+  const authUser = await requireAdminSection(pin, 'users');
   if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
 
@@ -1445,7 +1375,7 @@ app.post('/api/admin/update-user', async (req, res) => {
 app.post('/api/admin/toggle-admin', async (req, res) => {
   const pin = getPin(req);
   const targetId = String(req.body.targetId || '').trim();
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'users'))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
 
   const users = await readJson(FILES.users, []);
@@ -1464,7 +1394,7 @@ app.post('/api/admin/set-role', async (req, res) => {
   const targetId = String(req.body.targetId || '').trim();
   const role = String(req.body.role || '').trim();
 
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'users'))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
   const roles = await readJson(FILES.roles, DEFAULT_ROLES);
   if (!roles.some(r => r.id === role))
@@ -1539,7 +1469,7 @@ app.delete('/api/admin/roles/:id', async (req, res) => {
 
 app.post('/api/admin/crm-config', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'crm-config'))) return res.status(403).json({ message: 'Нет доступа.' });
   res.json(await getCrmConfig());
 });
 
@@ -1548,7 +1478,7 @@ app.post('/api/admin/crm-config-add', async (req, res) => {
   const field = String(req.body.field || '').trim();
   const value = clip(String(req.body.value || '').trim(), 200);
 
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'crm-config'))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!['modules', 'errorCategories'].includes(field))
     return res.status(400).json({ message: 'Неверное поле.' });
   if (!value) return res.status(400).json({ message: 'Введите название.' });
@@ -1571,7 +1501,7 @@ app.post('/api/admin/crm-config-delete', async (req, res) => {
   const field = String(req.body.field || '').trim();
   const value = String(req.body.value || '').trim();
 
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireAdminSection(pin, 'crm-config'))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!['modules', 'errorCategories'].includes(field))
     return res.status(400).json({ message: 'Неверное поле.' });
   if (!value) return res.status(400).json({ message: 'Укажите пункт.' });
@@ -1925,6 +1855,418 @@ app.delete('/api/boards/:id/columns/:colId', async (req, res) => {
   }));
 });
 
+/* ── Access / Permission Management (superadmin) ── */
+
+app.get('/api/admin/access', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+  const boards = await readJson(FILES.boards, []);
+  const kbCategories = await readJson(KB_FILES?.categories || path.join(dataDir, 'kb-categories.json'), []);
+  const users = await readJson(FILES.users, []);
+
+  // Enrich groups with member names
+  const enrichedGroups = (permsData.groups || []).map(g => ({
+    ...g,
+    memberNames: (g.members || []).map(mid => {
+      const u = users.find(u => u.id === mid);
+      return u ? { id: u.id, fullName: u.fullName } : { id: mid, fullName: '?' };
+    })
+  }));
+
+  // Available admin sections and features for permission checkboxes
+  const adminSections = [
+    { id: 'bookings', label: 'Бронирования' },
+    { id: 'tickets', label: 'CRM-заявки' },
+    { id: 'suggestions', label: 'Идеи' },
+    { id: 'users', label: 'Пользователи' },
+    { id: 'pin-requests', label: 'Пин-коды' },
+    { id: 'crm-config', label: 'CRM-конфиг' },
+    { id: 'roles-access', label: 'Роли и доступ' }
+  ];
+  const features = [
+    { id: 'tz_create_all', label: 'Создание всех типов ТЗ' },
+    { id: 'tz_edit_all', label: 'Редактирование любых ТЗ' },
+    { id: 'tz_bulk', label: 'Массовые операции с ТЗ' },
+    { id: 'tz_export', label: 'Экспорт ТЗ в Excel' },
+    { id: 'tz_import', label: 'Импорт ТЗ из Excel' },
+    { id: 'kb_manage_categories', label: 'Управление категориями базы знаний' },
+    { id: 'kb_create_articles', label: 'Создание статей в базе знаний' }
+  ];
+
+  return res.json({
+    roles: permsData.roles || [],
+    groups: enrichedGroups,
+    boards: boards.map(b => ({ id: b.id, name: b.name })),
+    kb_categories: kbCategories.map(c => ({ id: c.id, name: c.name })),
+    users: users.map(u => ({ id: u.id, fullName: u.fullName, role: u.role || 'employee' })),
+    adminSections,
+    features
+  });
+});
+
+app.post('/api/admin/access/roles', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const { name, description, permissions } = req.body;
+  if (!name || typeof name !== 'string' || name.trim().length < 1) {
+    return res.status(400).json({ message: 'Название роли обязательно.' });
+  }
+
+  return await withLock(FILES.permissions, async () => {
+    const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+    const id = name.trim().toLowerCase().replace(/[^a-zа-яё0-9]+/gi, '_').replace(/^_|_$/g, '') || randomUUID();
+
+    if (permsData.roles.some(r => r.id === id)) {
+      return res.status(400).json({ message: 'Роль с таким ID уже существует.' });
+    }
+
+    const newRole = {
+      id,
+      name: name.trim(),
+      description: (description || '').trim(),
+      system: false,
+      permissions: permissions || { admin_sections: [], boards: [], kb_categories: [], features: [] }
+    };
+    permsData.roles.push(newRole);
+    await writeJson(FILES.permissions, permsData);
+    return res.status(201).json(newRole);
+  });
+});
+
+app.put('/api/admin/access/roles/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const roleId = req.params.id;
+  const { name, description, permissions } = req.body;
+
+  return await withLock(FILES.permissions, async () => {
+    const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+    const role = permsData.roles.find(r => r.id === roleId);
+    if (!role) return res.status(404).json({ message: 'Роль не найдена.' });
+
+    if (name !== undefined) role.name = String(name).trim();
+    if (description !== undefined) role.description = String(description).trim();
+    if (permissions !== undefined) role.permissions = permissions;
+
+    await writeJson(FILES.permissions, permsData);
+    return res.json(role);
+  });
+});
+
+app.delete('/api/admin/access/roles/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const roleId = req.params.id;
+
+  return await withLock(FILES.permissions, async () => {
+    const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+    const role = permsData.roles.find(r => r.id === roleId);
+    if (!role) return res.status(404).json({ message: 'Роль не найдена.' });
+    if (role.system) return res.status(400).json({ message: 'Нельзя удалить системную роль.' });
+
+    permsData.roles = permsData.roles.filter(r => r.id !== roleId);
+    await writeJson(FILES.permissions, permsData);
+    return res.json({ message: 'Роль удалена.' });
+  });
+});
+
+app.post('/api/admin/access/groups', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const { name, description, members, permissions } = req.body;
+  if (!name || typeof name !== 'string' || name.trim().length < 1) {
+    return res.status(400).json({ message: 'Название группы обязательно.' });
+  }
+
+  return await withLock(FILES.permissions, async () => {
+    const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+    const newGroup = {
+      id: randomUUID(),
+      name: name.trim(),
+      description: (description || '').trim(),
+      members: Array.isArray(members) ? members : [],
+      permissions: permissions || { admin_sections: [], boards: [], kb_categories: [], features: [] }
+    };
+    if (!permsData.groups) permsData.groups = [];
+    permsData.groups.push(newGroup);
+    await writeJson(FILES.permissions, permsData);
+    return res.status(201).json(newGroup);
+  });
+});
+
+app.put('/api/admin/access/groups/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const groupId = req.params.id;
+  const { name, description, members, permissions } = req.body;
+
+  return await withLock(FILES.permissions, async () => {
+    const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+    if (!permsData.groups) permsData.groups = [];
+    const group = permsData.groups.find(g => g.id === groupId);
+    if (!group) return res.status(404).json({ message: 'Группа не найдена.' });
+
+    if (name !== undefined) group.name = String(name).trim();
+    if (description !== undefined) group.description = String(description).trim();
+    if (members !== undefined) group.members = Array.isArray(members) ? members : group.members;
+    if (permissions !== undefined) group.permissions = permissions;
+
+    await writeJson(FILES.permissions, permsData);
+    return res.json(group);
+  });
+});
+
+app.delete('/api/admin/access/groups/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const groupId = req.params.id;
+
+  return await withLock(FILES.permissions, async () => {
+    const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+    if (!permsData.groups) permsData.groups = [];
+    permsData.groups = permsData.groups.filter(g => g.id !== groupId);
+    await writeJson(FILES.permissions, permsData);
+    return res.json({ message: 'Группа удалена.' });
+  });
+});
+
+app.put('/api/admin/access/user-role', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const { userId, roleId } = req.body;
+  if (!userId || !roleId) {
+    return res.status(400).json({ message: 'userId и roleId обязательны.' });
+  }
+
+  // Validate role exists
+  const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+  if (!permsData.roles.some(r => r.id === roleId)) {
+    return res.status(400).json({ message: 'Указанная роль не существует.' });
+  }
+
+  return await withLock(FILES.users, async () => {
+    const users = await readJson(FILES.users, []);
+    const user = users.find(u => u.id === userId);
+    if (!user) return res.status(404).json({ message: 'Пользователь не найден.' });
+
+    user.role = roleId;
+    // Clear legacy isAdmin flag when explicitly setting role
+    if (roleId === 'superadmin') user.isAdmin = true;
+    else if (roleId === 'employee') delete user.isAdmin;
+
+    await writeJson(FILES.users, users);
+    // Invalidate pin cache for this user
+    for (const [k, v] of _pinCache.entries()) {
+      if (v.user && v.user.id === userId) _pinCache.delete(k);
+    }
+    return res.json({ message: 'Роль обновлена.', userId, roleId });
+  });
+});
+
+/* ── My Tasks (Мои задачи) ── */
+
+const TASK_STATUSES = ['todo', 'in_progress', 'done', 'cancelled'];
+const TASK_TYPES = ['task', 'bug', 'proposal'];
+
+// proposals endpoint must be registered BEFORE :id routes
+app.get('/api/tasks/proposals', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user || !isSuperAdmin(pin, user)) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const tasks = await readJson(FILES.tasks, []);
+  const users = await readJson(FILES.users, []);
+  const proposals = tasks
+    .filter(t => t.type === 'proposal')
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map(t => ({
+      ...t,
+      creator_name: users.find(u => u.id === t.creator_id)?.fullName || '?'
+    }));
+  return res.json(proposals);
+});
+
+app.get('/api/tasks', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const tasks = await readJson(FILES.tasks, []);
+  const users = await readJson(FILES.users, []);
+
+  // User sees: tasks they created OR tasks assigned to them
+  const mine = tasks
+    .filter(t => t.creator_id === user.id || t.assignee_id === user.id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at));
+
+  // Resolve names
+  const resolved = mine.map(t => ({
+    ...t,
+    creator_name: users.find(u => u.id === t.creator_id)?.fullName || '?',
+    assignee_name: users.find(u => u.id === t.assignee_id)?.fullName || '?'
+  }));
+
+  return res.json(resolved);
+});
+
+app.post('/api/tasks', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const title = clip(String(req.body.title || '').trim(), 200);
+  if (title.length < 3) return res.status(400).json({ message: 'Название минимум 3 символа.' });
+
+  const type = TASK_TYPES.includes(req.body.type) ? req.body.type : 'task';
+  const priority = ['low', 'medium', 'high'].includes(req.body.priority) ? req.body.priority : 'medium';
+  const assigneeId = String(req.body.assignee_id || '').trim() || user.id;
+
+  // Validate assignee exists
+  const users = await readJson(FILES.users, []);
+  if (!users.some(u => u.id === assigneeId)) {
+    return res.status(400).json({ message: 'Исполнитель не найден.' });
+  }
+
+  return withLock(FILES.tasks, async () => {
+    const tasks = await readJson(FILES.tasks, []);
+    const task = {
+      id: randomUUID(),
+      title,
+      description: clip(String(req.body.description || '').trim(), 5000),
+      status: 'todo',
+      priority,
+      creator_id: user.id,
+      assignee_id: assigneeId,
+      due_date: req.body.due_date || '',
+      tags: Array.isArray(req.body.tags) ? req.body.tags.map(t => clip(String(t).trim(), 50)).filter(Boolean).slice(0, 10) : [],
+      type,
+      proposal_status: type === 'proposal' ? 'pending' : null,
+      proposal_reviewed_by: null,
+      proposal_reviewed_at: null,
+      tz_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: new Date().toISOString()
+    };
+    tasks.push(task);
+    await writeJson(FILES.tasks, tasks);
+
+    // Notify assignee if different from creator
+    if (assigneeId !== user.id) {
+      await createNotification(assigneeId, 'task_assigned', 'Вам назначена задача', task.title, `#tasks/${task.id}`);
+    }
+
+    return res.status(201).json({ message: 'Задача создана.', task });
+  });
+});
+
+app.put('/api/tasks/:id', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const sa = isSuperAdmin(pin, user);
+
+  return withLock(FILES.tasks, async () => {
+    const tasks = await readJson(FILES.tasks, []);
+    const task = tasks.find(t => t.id === req.params.id);
+    if (!task) return res.status(404).json({ message: 'Задача не найдена.' });
+
+    // Only creator, assignee, or superadmin can edit
+    if (task.creator_id !== user.id && task.assignee_id !== user.id && !sa) {
+      return res.status(403).json({ message: 'Нет прав на редактирование.' });
+    }
+
+    if (req.body.title !== undefined) task.title = clip(String(req.body.title).trim(), 200);
+    if (req.body.description !== undefined) task.description = clip(String(req.body.description).trim(), 5000);
+    if (req.body.status !== undefined && TASK_STATUSES.includes(req.body.status)) {
+      const oldStatus = task.status;
+      task.status = req.body.status;
+      // Notify assignee about status change
+      if (oldStatus !== task.status && task.assignee_id !== user.id) {
+        await createNotification(task.assignee_id, 'task_assigned', 'Статус задачи изменён', `${task.title}: ${oldStatus} → ${task.status}`, `#tasks/${task.id}`);
+      }
+    }
+    if (req.body.priority !== undefined && ['low', 'medium', 'high'].includes(req.body.priority)) task.priority = req.body.priority;
+    if (req.body.due_date !== undefined) task.due_date = String(req.body.due_date || '');
+    if (req.body.tags !== undefined) task.tags = Array.isArray(req.body.tags) ? req.body.tags.map(t => clip(String(t).trim(), 50)).filter(Boolean).slice(0, 10) : task.tags;
+    if (req.body.assignee_id !== undefined) {
+      const oldAssignee = task.assignee_id;
+      task.assignee_id = String(req.body.assignee_id).trim();
+      if (task.assignee_id !== oldAssignee && task.assignee_id !== user.id) {
+        await createNotification(task.assignee_id, 'task_assigned', 'Вам назначена задача', task.title, `#tasks/${task.id}`);
+      }
+    }
+
+    task.updated_at = new Date().toISOString();
+    await writeJson(FILES.tasks, tasks);
+    return res.json({ message: 'Задача обновлена.', task });
+  });
+});
+
+app.delete('/api/tasks/:id', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const sa = isSuperAdmin(pin, user);
+
+  return withLock(FILES.tasks, async () => {
+    const tasks = await readJson(FILES.tasks, []);
+    const idx = tasks.findIndex(t => t.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Задача не найдена.' });
+
+    const task = tasks[idx];
+    if (task.creator_id !== user.id && !sa) {
+      return res.status(403).json({ message: 'Удалить может только автор или суперадмин.' });
+    }
+
+    tasks.splice(idx, 1);
+    await writeJson(FILES.tasks, tasks);
+    return res.json({ message: 'Задача удалена.' });
+  });
+});
+
+// Proposal review (superadmin only)
+app.patch('/api/tasks/:id/review', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user || !isSuperAdmin(pin, user)) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const { decision } = req.body; // 'approved' | 'rejected'
+  if (!['approved', 'rejected'].includes(decision)) {
+    return res.status(400).json({ message: 'Укажите decision: approved или rejected.' });
+  }
+
+  return withLock(FILES.tasks, async () => {
+    const tasks = await readJson(FILES.tasks, []);
+    const task = tasks.find(t => t.id === req.params.id);
+    if (!task) return res.status(404).json({ message: 'Задача не найдена.' });
+    if (task.type !== 'proposal') return res.status(400).json({ message: 'Это не предложение.' });
+
+    task.proposal_status = decision;
+    task.proposal_reviewed_by = user.id;
+    task.proposal_reviewed_at = new Date().toISOString();
+    task.updated_at = new Date().toISOString();
+
+    await writeJson(FILES.tasks, tasks);
+
+    // Notify creator
+    const statusText = decision === 'approved' ? 'одобрено' : 'отклонено';
+    await createNotification(task.creator_id, 'system', `Предложение ${statusText}`, task.title, `#tasks/${task.id}`);
+
+    return res.json({ message: `Предложение ${statusText}.`, task });
+  });
+});
+
 /* ── TZ (Технические задания) ── */
 
 app.get('/api/tz-config', async (_req, res) => {
@@ -1942,6 +2284,14 @@ app.get('/api/tz-config', async (_req, res) => {
     users: usersList,
     boards
   });
+});
+
+app.get('/api/tz-tags', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const allTz = await readJson(FILES.tz, []);
+  const tags = [...new Set(allTz.flatMap(t => t.tags || []))].sort();
+  return res.json(tags);
 });
 
 app.post('/api/tz', async (req, res) => {
@@ -2039,6 +2389,8 @@ app.post('/api/tz', async (req, res) => {
       assigned_by_id: assignee_id ? authUser.id : null,
       deadline: deadline || null,
       linked_tz_ids: [],
+      tags: Array.isArray(req.body.tags) ? req.body.tags.map(t => clip(String(t).trim(), 50)).filter(Boolean).slice(0, 20) : [],
+      estimate: ['XS','S','M','L','XL'].includes(req.body.estimate) ? req.body.estimate : '',
       created_by: creatorName,
       created_by_id: authUser.id,
       created_at: new Date().toISOString(),
@@ -2094,7 +2446,7 @@ app.put('/api/tz/:id', async (req, res) => {
       'title', 'system', 'type', 'priority', 'status',
       'description', 'owner', 'link_confluence', 'link_jira', 'completion_notes',
       'date_analysis_deadline', 'date_dev_deadline', 'date_release_deadline',
-      'assignee_id', 'deadline', 'linked_tz_ids'
+      'assignee_id', 'deadline', 'linked_tz_ids', 'tags', 'estimate'
     ];
 
     // Status transition check — validate against board columns
@@ -2185,6 +2537,26 @@ app.put('/api/tz/:id', async (req, res) => {
         continue;
       }
 
+      if (field === 'tags') {
+        const newTags = Array.isArray(req.body.tags) ? req.body.tags.map(t => clip(String(t).trim(), 50)).filter(Boolean).slice(0, 20) : tz.tags;
+        const oldTags = tz.tags || [];
+        if (JSON.stringify(oldTags) !== JSON.stringify(newTags)) {
+          await recordTzHistory(tz.id, 'tags', oldTags.join(', '), newTags.join(', '), changedBy);
+          tz.tags = newTags;
+        }
+        continue;
+      }
+
+      if (field === 'estimate') {
+        const newEstimate = ['XS','S','M','L','XL'].includes(req.body.estimate) ? req.body.estimate : '';
+        const oldEstimate = tz.estimate || '';
+        if (oldEstimate !== newEstimate) {
+          await recordTzHistory(tz.id, 'estimate', oldEstimate, newEstimate, changedBy);
+          tz.estimate = newEstimate;
+        }
+        continue;
+      }
+
       const oldVal = tz[field] ?? null;
       if (String(oldVal ?? '') !== String(newVal ?? '')) {
         await recordTzHistory(tz.id, field, oldVal, newVal, changedBy);
@@ -2194,6 +2566,11 @@ app.put('/api/tz/:id', async (req, res) => {
 
     tz.updated_at = new Date().toISOString();
     await writeJson(FILES.tz, allTz);
+
+    // Notify assignee about assignment
+    if (req.body.assignee_id !== undefined && tz.assignee_id && tz.assignee_id !== authUser?.id) {
+      await createNotification(tz.assignee_id, 'tz_assigned', 'Вам назначено ТЗ', `${tz.tz_code}: ${tz.title}`, `#tz/view/${tz.id}`);
+    }
 
     const resp = { message: 'ТЗ обновлено.', tz };
     if (warnings.length) resp.warnings = warnings;
@@ -2214,6 +2591,7 @@ function filterTz(allTz, body, usersMap, boards) {
   const fDeadlineSoon = !!body.deadline_soon;
   const fMissingDeadline = !!body.missing_deadline;
   const fAssignee = String(body.assignee_id || '').trim();
+  const fTag = String(body.tag || '').trim();
 
   // Phase 1: cheap filters on raw data (before computeTzFlags)
   let items = allTz;
@@ -2223,6 +2601,7 @@ function filterTz(allTz, body, usersMap, boards) {
   if (fType) items = items.filter((t) => t.type === fType);
   if (fPriority) items = items.filter((t) => t.priority === fPriority);
   if (fAssignee) items = items.filter((t) => t.assignee_id === fAssignee);
+  if (fTag) items = items.filter((t) => (t.tags || []).includes(fTag));
 
   // Phase 2: compute flags + assignee names only for remaining items
   const getOrd = makeBoardOrdCache(boards || []);
@@ -2303,7 +2682,7 @@ app.patch('/api/tz/:id/approve', async (req, res) => {
 });
 
 app.get('/api/tz/:id', async (req, res) => {
-  const reqPin = String(req.query.pin || '').trim();
+  const reqPin = getPin(req);
   const id = req.params.id;
   const allTz = await readJson(FILES.tz, []);
   const tz = allTz.find((t) => t.id === id);
@@ -2383,7 +2762,7 @@ app.post('/api/admin/tz-stats', async (req, res) => {
 
 app.post('/api/admin/tz-export', async (req, res) => {
   const pin = getPin(req);
-  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  if (!(await requireFeature(pin, 'tz_export'))) return res.status(403).json({ message: 'Нет доступа.' });
 
   const allTz = await readJson(FILES.tz, []);
   const users = await readJson(FILES.users, []);
@@ -2463,7 +2842,7 @@ app.post('/api/admin/tz-import', (req, res) => {
     if (uploadErr) return res.status(400).json({ message: uploadErr.message });
     try {
       const pin = getPin(req);
-      const authUser = await requireSuperAdmin(pin);
+      const authUser = await requireFeature(pin, 'tz_import');
       if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
 
       if (!req.file) return res.status(400).json({ message: 'Файл не загружен.' });
@@ -2535,7 +2914,7 @@ ${JSON.stringify(rows, null, 2)}`;
 
 app.post('/api/admin/tz-bulk', async (req, res) => {
   const pin = getPin(req);
-  const authUser = await requireSuperAdmin(pin);
+  const authUser = await requireFeature(pin, 'tz_bulk');
   if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
 
   const ids = req.body.ids;
@@ -2657,12 +3036,25 @@ app.post('/api/admin/tz-kanban', async (req, res) => {
     swimlanes = [...assigneeMap.entries()].map(([key, cols]) => ({ key, label: key, columns: cols }));
   }
 
+  // Compute WIP limit exceeded flags per column
+  const wipExceeded = {};
+  if (boardColumns) {
+    for (const col of boardColumns) {
+      if (col.wip_limit > 0) {
+        wipExceeded[col.id] = (columns[col.id] || []).length > col.wip_limit;
+      } else {
+        wipExceeded[col.id] = false;
+      }
+    }
+  }
+
   return res.json({
     columns,
     transitions,
     statusLabels,
     boardColumns: boardColumns || null,
-    swimlanes
+    swimlanes,
+    wipExceeded
   });
 });
 
@@ -2711,13 +3103,35 @@ app.patch('/api/tz/:id/status', async (req, res) => {
     tz.updated_at = new Date().toISOString();
     await writeJson(FILES.tz, allTz);
 
-    // Notify watchers
+    // Notify watchers (Telegram)
     const oldLabel = statusLabelsLocal[oldStatus] || oldStatus;
     const newLabel = statusLabelsLocal[newStatus] || newStatus;
     notifyTzWatchers(tz, `Статус: ${oldLabel} → <b>${escHtml(newLabel)}</b>\nИзменил: ${escHtml(changedBy)}`, authUser.id);
 
+    // In-app notifications for watchers, assignee, creator
+    const statusNotifyIds = new Set([...(tz.watchers || [])]);
+    if (tz.assignee_id) statusNotifyIds.add(tz.assignee_id);
+    if (tz.created_by_id) statusNotifyIds.add(tz.created_by_id);
+    statusNotifyIds.delete(authUser?.id);
+    if (statusNotifyIds.size) {
+      await notifyUsers([...statusNotifyIds], 'tz_status', 'Статус ТЗ изменён', `${tz.tz_code}: ${oldLabel} → ${newLabel}`, `#tz/view/${tz.id}`);
+    }
+
     const statusOrd = board ? buildStatusOrd(board.columns) : TZ_STATUS_ORD;
-    return res.json({ message: `Статус изменён на «${statusLabelsLocal[newStatus] || newStatus}».`, tz: { ...tz, flags: computeTzFlags(tz, statusOrd) } });
+    const responseObj = { message: `Статус изменён на «${statusLabelsLocal[newStatus] || newStatus}».`, tz: { ...tz, flags: computeTzFlags(tz, statusOrd) } };
+
+    // WIP limit warning
+    if (board) {
+      const targetCol = board.columns.find(c => c.id === newStatus);
+      if (targetCol && targetCol.wip_limit > 0) {
+        const countInCol = allTz.filter(t => t.board_id === board.id && t.status === newStatus).length;
+        if (countInCol > targetCol.wip_limit) {
+          responseObj.warnings = ['WIP-лимит колонки превышен'];
+        }
+      }
+    }
+
+    return res.json(responseObj);
   });
 });
 
@@ -2808,8 +3222,30 @@ app.post('/api/tz/:id/comments', async (req, res) => {
     all.push(comment);
     await writeJson(FILES.tzComments, all);
 
-    // Notify watchers about new comment
+    // Notify watchers about new comment (Telegram)
     notifyTzWatchers(tz, `💬 ${escHtml(user.fullName)}: ${escHtml(text.length > 100 ? text.slice(0, 100) + '...' : text)}`, user.id);
+
+    // In-app notifications for watchers, assignee, creator
+    const commentNotifyIds = new Set([...(tz.watchers || [])]);
+    if (tz.assignee_id) commentNotifyIds.add(tz.assignee_id);
+    if (tz.created_by_id) commentNotifyIds.add(tz.created_by_id);
+    commentNotifyIds.delete(user.id);
+    if (commentNotifyIds.size) {
+      await notifyUsers([...commentNotifyIds], 'tz_comment', 'Новый комментарий', `${tz.tz_code}: ${clip(text, 100)}`, `#tz/view/${tz.id}`);
+    }
+
+    // Parse @mentions
+    const mentionRegex = /@([А-Яа-яЁёA-Za-z]+ [А-Яа-яЁёA-Za-z.]+)/g;
+    const mentions = [...text.matchAll(mentionRegex)].map(m => m[1]);
+    if (mentions.length) {
+      const allUsers = await readJson(FILES.users, []);
+      for (const name of mentions) {
+        const mentioned = allUsers.find(u => u.fullName.toLowerCase().includes(name.toLowerCase()));
+        if (mentioned && mentioned.id !== user.id) {
+          await createNotification(mentioned.id, 'tz_mention', 'Вас упомянули в комментарии', `${tz.tz_code}: ${clip(text, 100)}`, `#tz/view/${tz.id}`);
+        }
+      }
+    }
 
     return res.status(201).json(comment);
   });
@@ -2863,14 +3299,18 @@ async function getKbUserGroups(userId) {
   return groups.filter(g => g.members.includes(userId));
 }
 
-function canAccessKbCategory(cat, userId, userGroups, isSA) {
+function canAccessKbCategory(cat, userId, userGroups, isSA, userPerms) {
   if (isSA) return true;
+  // New: check unified permissions
+  if (userPerms && hasPermission(userPerms, 'kb_categories', cat.id)) return true;
   if (!cat.group_id) return true; // public category
   return userGroups.some(g => g.id === cat.group_id);
 }
 
-function canEditKbCategory(cat, userId, userGroups, isSA) {
+function canEditKbCategory(cat, userId, userGroups, isSA, userPerms) {
   if (isSA) return true;
+  // New: check unified permissions
+  if (userPerms && hasPermission(userPerms, 'kb_categories', cat.id)) return true;
   if (!cat.group_id) return false; // public — only superadmin edits
   return userGroups.some(g => g.id === cat.group_id);
 }
@@ -2968,15 +3408,17 @@ app.get('/api/kb/categories', async (req, res) => {
 
   const sa = isSuperAdmin(pin, user);
   const userGroups = await getKbUserGroups(user.id);
+  const perms = await getUserPermissions(pin);
+  const uPerms = perms?.permissions || null;
   const cats = await readJson(KB_FILES.categories, []);
   const articles = await readJson(KB_FILES.articles, []);
   const visible = cats
-    .filter(c => canAccessKbCategory(c, user.id, userGroups, sa))
+    .filter(c => canAccessKbCategory(c, user.id, userGroups, sa, uPerms))
     .sort((a, b) => (a.order ?? 0) - (b.order ?? 0))
     .map((c) => ({
       ...c,
       articleCount: articles.filter((a) => a.category_id === c.id).length,
-      canEdit: canEditKbCategory(c, user.id, userGroups, sa)
+      canEdit: canEditKbCategory(c, user.id, userGroups, sa, uPerms)
     }));
   return res.json(visible);
 });
@@ -3132,12 +3574,17 @@ app.get('/api/kb/articles/:id', async (req, res) => {
   const cats = await readJson(KB_FILES.categories, []);
   const cat = cats.find(c => c.id === article.category_id);
   const userGroups = await getKbUserGroups(user.id);
+  const perms = await getUserPermissions(pin);
+  const uPerms = perms?.permissions || null;
   if (!canAccessKbArticle(article, cat || {}, user.id, userGroups, sa)) {
-    return res.status(403).json({ message: 'Нет доступа к этой статье.' });
+    // Also check unified permissions as fallback
+    if (!uPerms || !hasPermission(uPerms, 'kb_categories', cat?.id)) {
+      return res.status(403).json({ message: 'Нет доступа к этой статье.' });
+    }
   }
 
   // Add canEdit flag
-  const canEdit = sa || canEditKbCategory(cat || {}, user.id, userGroups, sa);
+  const canEdit = sa || canEditKbCategory(cat || {}, user.id, userGroups, sa, uPerms);
   return res.json({ ...article, canEdit });
 });
 
@@ -3155,7 +3602,9 @@ app.post('/api/kb/articles', async (req, res) => {
   if (categoryId && !cat) return res.status(400).json({ message: 'Категория не найдена.' });
 
   const userGroups = await getKbUserGroups(user.id);
-  if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+  const perms = await getUserPermissions(pin);
+  const uPerms = perms?.permissions || null;
+  if (!canEditKbCategory(cat || {}, user.id, userGroups, sa, uPerms)) {
     return res.status(403).json({ message: 'Нет прав на создание статей в этой категории.' });
   }
 
@@ -3201,9 +3650,31 @@ app.put('/api/kb/articles/:id', async (req, res) => {
     const cats = await readJson(KB_FILES.categories, []);
     const cat = cats.find(c => c.id === article.category_id);
     const userGroups = await getKbUserGroups(user.id);
-    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+    const perms = await getUserPermissions(pin);
+    const uPerms = perms?.permissions || null;
+    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa, uPerms)) {
       return res.status(403).json({ message: 'Нет прав на редактирование.' });
     }
+
+    // Save version history before updating
+    const history = await readJson(FILES.kbHistory, []);
+    history.push({
+      id: randomUUID(),
+      article_id: article.id,
+      title: article.title,
+      content: article.content,
+      edited_by: user.fullName,
+      edited_by_id: user.id,
+      created_at: new Date().toISOString()
+    });
+    // Keep max 50 versions per article
+    const articleHistory = history.filter(h => h.article_id === article.id);
+    if (articleHistory.length > 50) {
+      const oldest = articleHistory.sort((a, b) => a.created_at.localeCompare(b.created_at))[0];
+      const idx = history.findIndex(h => h.id === oldest.id);
+      if (idx !== -1) history.splice(idx, 1);
+    }
+    await writeJson(FILES.kbHistory, history);
 
     if (req.body.title !== undefined) {
       const t = clip(String(req.body.title).trim(), 300);
@@ -3244,7 +3715,9 @@ app.put('/api/kb/articles/:id/share', async (req, res) => {
     const cats = await readJson(KB_FILES.categories, []);
     const cat = cats.find(c => c.id === article.category_id);
     const userGroups = await getKbUserGroups(user.id);
-    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+    const perms = await getUserPermissions(pin);
+    const uPerms = perms?.permissions || null;
+    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa, uPerms)) {
       return res.status(403).json({ message: 'Нет прав.' });
     }
 
@@ -3271,7 +3744,9 @@ app.delete('/api/kb/articles/:id', async (req, res) => {
     const cats = await readJson(KB_FILES.categories, []);
     const cat = cats.find(c => c.id === article.category_id);
     const userGroups = await getKbUserGroups(user.id);
-    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa)) {
+    const perms = await getUserPermissions(pin);
+    const uPerms = perms?.permissions || null;
+    if (!canEditKbCategory(cat || {}, user.id, userGroups, sa, uPerms)) {
       return res.status(403).json({ message: 'Нет прав на удаление.' });
     }
 
@@ -3281,12 +3756,149 @@ app.delete('/api/kb/articles/:id', async (req, res) => {
   });
 });
 
+// KB Article version history
+app.get('/api/kb/articles/:id/history', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const articles = await readJson(KB_FILES.articles, []);
+  const article = articles.find(a => a.id === req.params.id);
+  if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
+
+  const history = await readJson(FILES.kbHistory, []);
+  const versions = history
+    .filter(h => h.article_id === req.params.id)
+    .sort((a, b) => b.created_at.localeCompare(a.created_at))
+    .map(h => ({ id: h.id, title: h.title, edited_by: h.edited_by, created_at: h.created_at }));
+  return res.json(versions);
+});
+
+app.get('/api/kb/articles/:id/history/:versionId', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const history = await readJson(FILES.kbHistory, []);
+  const version = history.find(h => h.id === req.params.versionId && h.article_id === req.params.id);
+  if (!version) return res.status(404).json({ message: 'Версия не найдена.' });
+  return res.json(version);
+});
+
+app.post('/api/kb/articles/:id/restore/:versionId', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const sa = isSuperAdmin(pin, user);
+
+  const cats = await readJson(KB_FILES.categories, []);
+  const articles = await readJson(KB_FILES.articles, []);
+  const article = articles.find(a => a.id === req.params.id);
+  if (!article) return res.status(404).json({ message: 'Статья не найдена.' });
+
+  const cat = cats.find(c => c.id === article.category_id);
+  const userGroups = await getKbUserGroups(user.id);
+  const perms = await getUserPermissions(pin);
+  const uPerms = perms?.permissions || null;
+  if (!canEditKbCategory(cat || {}, user.id, userGroups, sa, uPerms)) {
+    return res.status(403).json({ message: 'Нет прав на редактирование.' });
+  }
+
+  const history = await readJson(FILES.kbHistory, []);
+  const version = history.find(h => h.id === req.params.versionId && h.article_id === req.params.id);
+  if (!version) return res.status(404).json({ message: 'Версия не найдена.' });
+
+  return withLock(KB_FILES.articles, async () => {
+    const arts = await readJson(KB_FILES.articles, []);
+    const art = arts.find(a => a.id === req.params.id);
+    if (!art) return res.status(404).json({ message: 'Статья не найдена.' });
+
+    // Save current as version before restoring
+    const hist = await readJson(FILES.kbHistory, []);
+    hist.push({
+      id: randomUUID(),
+      article_id: art.id,
+      title: art.title,
+      content: art.content,
+      edited_by: user.fullName,
+      edited_by_id: user.id,
+      created_at: new Date().toISOString()
+    });
+    await writeJson(FILES.kbHistory, hist);
+
+    art.title = version.title;
+    art.content = version.content;
+    art.updated_at = new Date().toISOString();
+    await writeJson(KB_FILES.articles, arts);
+    return res.json({ message: 'Версия восстановлена.' });
+  });
+});
+
 // KB users list for sharing (any authenticated user gets id+name only)
 app.get('/api/kb/users', async (req, res) => {
   const pin = getPin(req);
   if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
   const users = await readJson(FILES.users, []);
   return res.json(users.map(u => ({ id: u.id, fullName: u.fullName })));
+});
+
+// User names for @mention autocomplete
+app.get('/api/users/names', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const users = await readJson(FILES.users, []);
+  return res.json(users.map(u => ({ id: u.id, fullName: u.fullName })));
+});
+
+/* ── KB Templates ── */
+
+app.get('/api/kb/templates', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const templates = await readJson(FILES.kbTemplates, []);
+  return res.json(templates.map(t => ({ id: t.id, name: t.name, description: t.description || '' })));
+});
+
+app.get('/api/kb/templates/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await getUserByPin(pin))) return res.status(403).json({ message: 'Требуется авторизация.' });
+  const templates = await readJson(FILES.kbTemplates, []);
+  const tpl = templates.find(t => t.id === req.params.id);
+  if (!tpl) return res.status(404).json({ message: 'Шаблон не найден.' });
+  return res.json(tpl);
+});
+
+app.post('/api/kb/templates', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  const name = clip(String(req.body.name || '').trim(), 100);
+  if (name.length < 2) return res.status(400).json({ message: 'Название минимум 2 символа.' });
+  return withLock(FILES.kbTemplates, async () => {
+    const templates = await readJson(FILES.kbTemplates, []);
+    const tpl = {
+      id: randomUUID(),
+      name,
+      description: clip(String(req.body.description || '').trim(), 300),
+      content: clip(String(req.body.content || '').trim(), 2000000),
+      created_at: new Date().toISOString()
+    };
+    templates.push(tpl);
+    await writeJson(FILES.kbTemplates, templates);
+    return res.status(201).json({ message: 'Шаблон создан.', template: { id: tpl.id, name: tpl.name } });
+  });
+});
+
+app.delete('/api/kb/templates/:id', async (req, res) => {
+  const pin = getPin(req);
+  if (!(await requireSuperAdmin(pin))) return res.status(403).json({ message: 'Нет доступа.' });
+  return withLock(FILES.kbTemplates, async () => {
+    const templates = await readJson(FILES.kbTemplates, []);
+    const idx = templates.findIndex(t => t.id === req.params.id);
+    if (idx === -1) return res.status(404).json({ message: 'Шаблон не найден.' });
+    templates.splice(idx, 1);
+    await writeJson(FILES.kbTemplates, templates);
+    return res.json({ message: 'Шаблон удалён.' });
+  });
 });
 
 // KB image upload
@@ -3574,12 +4186,6 @@ app.get('/api/search', async (req, res) => {
     .slice(0, 10)
     .map((a) => ({ id: a.id, title: a.title, category_id: a.category_id }));
 
-  const itTickets = await readJson(FILES.itTickets, []);
-  results.tickets = itTickets
-    .filter((t) => t.userId === user.id && ((t.description || '').toLowerCase().includes(q) || (t.category || '').toLowerCase().includes(q)))
-    .slice(0, 10)
-    .map((t) => ({ id: t.id, category: t.category, description: (t.description || '').slice(0, 100), status: t.status }));
-
   return res.json(results);
 });
 
@@ -3648,6 +4254,126 @@ app.post('/api/admin/tz-metrics', async (req, res) => {
   const avgCycleTime = cycleTimes.length ? Math.round(cycleTimes.reduce((a, b) => a + b, 0) / cycleTimes.length) : 0;
 
   return res.json({ statusCounts, prioCounts, typeCounts, createdPerWeek, avgCycleTime, totalDone: doneTz.length, total: allTz.length });
+});
+
+/* ── Dashboard Metrics (all authenticated users) ── */
+
+app.get('/api/metrics', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(403).json({ message: 'Требуется авторизация.' });
+
+  const sa = isSuperAdmin(pin, user);
+  const allTz = await readJson(FILES.tz, []);
+  const boards = await readJson(FILES.boards, []);
+  const users = await readJson(FILES.users, []);
+  const bookings = await readJson(FILES.bookings, []);
+  const history = await readJson(FILES.tzHistory, []);
+
+  // Filter TZ based on access
+  let visibleTz = allTz;
+  if (!sa) {
+    const perms = await getUserPermissions(pin);
+    const accessibleBoards = perms?.permissions?.boards === '*'
+      ? boards.map(b => b.id)
+      : (perms?.permissions?.boards instanceof Set
+        ? [...perms.permissions.boards]
+        : (perms?.permissions?.boards || []));
+    visibleTz = allTz.filter(t =>
+      accessibleBoards.includes(t.board_id) ||
+      t.assignee_id === user.id ||
+      t.created_by_id === user.id
+    );
+  }
+
+  // TZ by status
+  const statusCounts = {};
+  for (const tz of visibleTz) statusCounts[tz.status] = (statusCounts[tz.status] || 0) + 1;
+
+  // TZ by priority
+  const prioCounts = {};
+  for (const tz of visibleTz) prioCounts[tz.priority || 'medium'] = (prioCounts[tz.priority || 'medium'] || 0) + 1;
+
+  // TZ by type
+  const typeCounts = {};
+  for (const tz of visibleTz) typeCounts[tz.type || 'ТЗ'] = (typeCounts[tz.type || 'ТЗ'] || 0) + 1;
+
+  // TZ by assignee (top 10)
+  const byAssignee = {};
+  for (const tz of visibleTz) {
+    if (tz.assignee_id) {
+      const u = users.find(u2 => u2.id === tz.assignee_id);
+      const name = u ? u.fullName : (tz.owner || '?');
+      byAssignee[name] = (byAssignee[name] || 0) + 1;
+    }
+  }
+  const topAssignees = Object.entries(byAssignee).sort((a, b) => b[1] - a[1]).slice(0, 10);
+
+  // Overdue / deadline soon / no dates
+  const now = new Date();
+  const getOrd = makeBoardOrdCache(boards);
+  let overdue = 0, deadlineSoon = 0, noDeadline = 0;
+  for (const tz of visibleTz) {
+    if (['production', 'cancelled', 'done'].includes(tz.status)) continue;
+    const flags = computeTzFlags(tz, getOrd(tz.board_id));
+    if (flags.overdue) overdue++;
+    if (flags.deadline_soon) deadlineSoon++;
+    if (flags.no_dates) noDeadline++;
+  }
+
+  // Created per week (last 12 weeks)
+  const nowMs = Date.now();
+  const weekMs = 7 * 24 * 60 * 60 * 1000;
+  const createdPerWeek = [];
+  for (let w = 11; w >= 0; w--) {
+    const weekStart = nowMs - (w + 1) * weekMs;
+    const weekEnd = nowMs - w * weekMs;
+    const count = visibleTz.filter(t => {
+      const ts = new Date(t.created_at).getTime();
+      return ts >= weekStart && ts < weekEnd;
+    }).length;
+    const label = new Date(weekEnd).toLocaleDateString('ru-RU', { day: '2-digit', month: '2-digit' });
+    createdPerWeek.push({ label, count });
+  }
+
+  // Cycle time (created -> done/production) in days
+  const doneTz = visibleTz.filter(t => ['production', 'release', 'done'].includes(t.status));
+  const cycleTimes = [];
+  for (const t of doneTz) {
+    const created = new Date(t.created_at).getTime();
+    const relevantHistory = history.filter(h => h.tz_id === t.id && ['production', 'release', 'done'].includes(h.new_status));
+    if (relevantHistory.length) {
+      const doneAt = new Date(relevantHistory[relevantHistory.length - 1].changed_at).getTime();
+      cycleTimes.push(Math.round((doneAt - created) / (24 * 60 * 60 * 1000)));
+    }
+  }
+  const avgCycleTime = cycleTimes.length ? Math.round(cycleTimes.reduce((a, b) => a + b, 0) / cycleTimes.length) : 0;
+
+  // Bookings today
+  const today = now.toISOString().slice(0, 10);
+  const todayBookings = bookings.filter(b => b.date === today).length;
+
+  // Total stats
+  const totalUsers = users.length;
+  const totalTz = visibleTz.length;
+  const activeTz = visibleTz.filter(t => !['production', 'cancelled', 'done', 'draft'].includes(t.status)).length;
+
+  return res.json({
+    totalUsers,
+    totalTz,
+    activeTz,
+    totalDone: doneTz.length,
+    overdue,
+    deadlineSoon,
+    noDeadline,
+    todayBookings,
+    avgCycleTime,
+    statusCounts,
+    prioCounts,
+    typeCounts,
+    topAssignees,
+    createdPerWeek
+  });
 });
 
 /* ── SPA fallback ── */

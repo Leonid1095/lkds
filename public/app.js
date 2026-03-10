@@ -24,6 +24,10 @@ const topbarUser = $('topbarUser');
 const topbarAvatar = $('topbarAvatar');
 const logoutBtn = $('logoutBtn');
 const adminBtn = $('adminBtn');
+const notifBell = $('notifBell');
+const notifBadge = $('notifBadge');
+const notifPanel = $('notifPanel');
+const notifList = $('notifList');
 
 const roomSelect = $('roomSelect');
 const dateInput = $('dateInput');
@@ -91,9 +95,6 @@ const profileMessage = $('profileMessage');
 const profileActions = $('profileActions');
 
 const linksGrid = $('linksGrid');
-const itWizard = $('itWizard');
-const itTicketMessage = $('itTicketMessage');
-const myItTicketsList = $('myItTicketsList');
 const adminContent = $('adminContent');
 
 /* ── TZ DOM ── */
@@ -200,19 +201,13 @@ const aiSendBtn = $('aiSendBtn');
 const aiMessage = $('aiMessage');
 let aiRefreshInterval = null;
 
-/* ── IT config (loaded from API, fallback hardcoded) ── */
+/* ── Tasks DOM ── */
+const tasksToolbar = $('tasksToolbar');
+const tasksContent = $('tasksContent');
 
-let IT_CATEGORIES = [
-  { id: 'software', label: 'ПО/установка',
-    subcategories: ['Установить/обновить программу', 'Лицензия/активация', 'Ошибка/вылетает', 'Печать/принтер'] },
-  { id: 'hardware', label: 'Компьютер/ноутбук',
-    subcategories: ['Тормозит/зависает', 'Не включается', 'Клавиатура/мышь/монитор'] },
-  { id: 'network', label: 'Интернет/сеть',
-    subcategories: ['Wi-Fi не работает', 'Нет интернета', 'Низкая скорость'] },
-  { id: 'vks', label: 'ВКС/Презентация', disabled: true, subcategories: [] },
-  { id: 'other', label: 'Другое', subcategories: [] }
-];
-let IT_LOCATIONS = [
+/* ── Work locations (used in profile) ── */
+
+const WORK_LOCATIONS = [
   'Модуль ЖД', 'Модуль КП', 'Офис 2 этаж',
   'Диспетчерская', 'Диспетчеры и операторы КП', 'Приемосдатчик'
 ];
@@ -223,12 +218,12 @@ const state = {
   user: null,
   userId: null,
   isAdmin: false,
-  adminRole: null, // 'superadmin' | 'it_admin' | null
+  adminRole: null, // 'superadmin' | null
+  permissions: null, // { admin_sections, boards, kb_categories, features }
   settings: { startHour: 8, endHour: 21, slotStep: 0.5 },
   rooms: [],
   bookings: [],
   crmConfig: { modules: [], errorCategories: [] },
-  itTicket: { step: 1, category: null, subcategory: null, location: null, seat: '', description: '' },
   tzConfig: null,
   tzFilters: { system: '', status: '', type: '', priority: '', search: '', overdue: false, no_dates: false, no_owner: false, deadline_soon: false, missing_deadline: false },
   tzList: [],
@@ -245,7 +240,9 @@ const state = {
   kbQuill: null,
   tzTemplates: [],
   metricsCharts: [],
-  adminPage: {} // { [type]: currentPage }
+  adminPage: {}, // { [type]: currentPage }
+  tasks: [],
+  taskFilter: { status: '', type: '', search: '' }
 };
 
 /* ── Module-scope timers (prevent leaks on re-render) ── */
@@ -342,6 +339,7 @@ function switchToTab(tabName, updateHash) {
   if (tabName === 'tz') loadTzData();
   if (tabName === 'kb') loadKbView();
   if (tabName === 'metrics') loadMetrics();
+  if (tabName === 'tasks') loadTasks();
   if (tabName === 'ai') { loadAiTasks(); startAiRefresh(); } else { stopAiRefresh(); }
   if (updateHash !== false) location.hash = tabName === 'kb' ? 'w' : tabName;
   return true;
@@ -424,6 +422,7 @@ async function tryAutoLogin() {
     state.isAdmin = !!data.admin;
     state.adminRole = data.adminRole || null;
     state.avatar = data.avatar || '';
+    state.permissions = data.permissions || null;
     return true;
   } catch {
     localStorage.removeItem('lkds_pin');
@@ -437,31 +436,43 @@ function showMain() {
   userGreeting.textContent = state.user.fullName;
   topbarAvatar.src = avatarUrl(state.avatar);
   topbarAvatar.alt = state.user.fullName;
-  if (state.adminRole === 'superadmin') {
+  const hasAdminAccess = state.adminRole === 'superadmin' ||
+    (state.permissions?.admin_sections && (state.permissions.admin_sections === '*' || state.permissions.admin_sections.length > 0));
+  if (hasAdminAccess) {
     show(adminBtn);
     updatePinBadge();
   } else {
     hide(adminBtn);
   }
-  const hasTzAccess = state.adminRole === 'superadmin' || (state.tzBoards || []).some(b => {
-    if (b.access === 'all') return true;
-    if (b.access === 'admins' && state.isAdmin) return true;
-    if (b.access === state.adminRole) return true; // specific role match
-    return false;
-  });
+  const hasTzAccess = state.adminRole === 'superadmin' ||
+    (state.permissions?.boards === '*') ||
+    (state.tzBoards || []).some(b => {
+      if (b.access === 'all') return true;
+      if (b.access === 'admins' && state.isAdmin) return true;
+      if (b.access === state.adminRole) return true;
+      if (state.permissions?.boards && Array.isArray(state.permissions.boards) && state.permissions.boards.includes(b.id)) return true;
+      return false;
+    });
   tabTz.style.display = (state.pin && hasTzAccess) ? '' : 'none';
   tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
   tabKb.style.display = state.pin ? '' : 'none';
+  const tabTasks = $('tabTasks');
+  if (tabTasks) tabTasks.style.display = state.pin ? '' : 'none';
   if (metricsContent) {
     const tabMetrics = $('tabMetrics');
-    if (tabMetrics) tabMetrics.style.display = 'none'; // скрыто до доработки
+    if (tabMetrics) tabMetrics.style.display = '';
   }
+  show(notifBell);
+  startNotifPolling();
   updateTzBadge();
 }
 
 function showAuth() {
   show(authScreen);
   hide(mainScreen);
+  hide(notifBell);
+  stopNotifPolling();
+  notifPanel?.classList.add('hidden');
   state.pin = null;
   state.user = null;
   state.userId = null;
@@ -485,6 +496,7 @@ loginForm.addEventListener('submit', async (e) => {
     state.isAdmin = !!data.admin;
     state.adminRole = data.adminRole || null;
     state.avatar = data.avatar || '';
+    state.permissions = data.permissions || null;
     localStorage.setItem('lkds_pin', enteredPin);
     showMain();
     await loadApp();
@@ -576,12 +588,6 @@ async function loadApp() {
   state.crmConfig = crmConfig;
 
   try {
-    const itConfig = await api('/api/it-config');
-    if (itConfig.categories) IT_CATEGORIES = itConfig.categories;
-    if (itConfig.locations) IT_LOCATIONS = itConfig.locations;
-  } catch { /* fallback: сервер ещё без /api/it-config */ }
-
-  try {
     state.tzConfig = await api('/api/tz-config');
     state.tzBoards = state.tzConfig.boards || [];
     if (!state.tzBoardId && state.tzBoards.length) {
@@ -595,8 +601,6 @@ async function loadApp() {
   renderRooms();
   renderLinks(links);
   renderCrmConfig();
-  resetItWizard();
-  loadMyItTickets();
 
   if (state.adminRole === 'superadmin' && state.tzConfig) {
     renderTzFilters();
@@ -604,6 +608,7 @@ async function loadApp() {
   }
   dateInput.value = getToday();
   await loadBookings();
+  try { state.tasks = await api('/api/tasks'); updateTasksBadge(); } catch { /* ignore */ }
 }
 
 /* ── Rooms ── */
@@ -892,7 +897,7 @@ async function openProfile(pin) {
 
     // Workplace fields
     profileWorkLocation.innerHTML = '<option value="">Не указано</option>' +
-      IT_LOCATIONS.map((l) => `<option value="${esc(l)}"${l === data.workLocation ? ' selected' : ''}>${esc(l)}</option>`).join('');
+      WORK_LOCATIONS.map((l) => `<option value="${esc(l)}"${l === data.workLocation ? ' selected' : ''}>${esc(l)}</option>`).join('');
     profileWorkDesk.value = data.workDesk || '';
 
     // Show/hide desk field based on location
@@ -1073,263 +1078,6 @@ ticketForm.addEventListener('submit', async (e) => {
   }
 });
 
-/* ── IT Wizard ── */
-
-function resetItWizard() {
-  if (!itWizard) return;
-  state.itTicket = { step: 1, category: null, subcategory: null, location: null, seat: '', description: '', _showAllLocations: false };
-  msg(itTicketMessage, '');
-  renderItStep();
-}
-
-function itBreadcrumbs() {
-  const t = state.itTicket;
-  const parts = [];
-  if (t.category) {
-    const cat = IT_CATEGORIES.find((c) => c.id === t.category);
-    if (cat) parts.push(`${cat.emoji} ${cat.label}`);
-  }
-  if (t.subcategory) parts.push(t.subcategory);
-  if (t.location) parts.push(t.location);
-  if (t.seat) parts.push(`Место ${t.seat}`);
-  if (!parts.length) return '';
-  const html = parts.map((p, i) =>
-    i < parts.length - 1
-      ? `<span>${esc(p)}</span><span class="it-bc-sep">&rsaquo;</span>`
-      : `<span class="it-bc-current">${esc(p)}</span>`
-  ).join('');
-  return `<div class="it-breadcrumbs">${html}</div>`;
-}
-
-function renderItStep() {
-  const t = state.itTicket;
-  const step = t.step;
-  let html = itBreadcrumbs();
-
-  if (step === 1) {
-    html += `<p class="it-step-title">Выберите категорию</p><div class="it-options">`;
-    for (const cat of IT_CATEGORIES) {
-      const dis = cat.disabled ? ' disabled' : '';
-      const badge = cat.disabled ? '<span class="badge-dev">В разработке</span>' : '';
-      html += `<button class="it-option${dis}" data-cat="${esc(cat.id)}">
-        ${esc(cat.label)}${badge}
-      </button>`;
-    }
-    html += '</div>';
-
-  } else if (step === 2) {
-    const cat = IT_CATEGORIES.find((c) => c.id === t.category);
-    if (t.category === 'other') {
-      html += `<p class="it-step-title">Опишите проблему</p>`;
-      html += `<div class="it-desc-group">
-        <label>Описание проблемы</label>
-        <textarea id="itOtherDesc" rows="4" placeholder="Опишите вашу проблему..."></textarea>
-      </div>`;
-      html += `<button class="it-submit-btn" id="itOtherNext">Далее</button>`;
-      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
-    } else {
-      html += `<p class="it-step-title">Выберите тип проблемы</p><div class="it-options">`;
-      for (const sub of cat.subcategories) {
-        html += `<button class="it-option" data-sub="${esc(sub)}">
-          ${esc(sub)}
-        </button>`;
-      }
-      html += '</div>';
-      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
-    }
-
-  } else if (step === 3) {
-    const profLoc = state.user?.workLocation;
-    const profDesk = state.user?.workDesk;
-    if (profLoc && !t._showAllLocations) {
-      html += `<p class="it-step-title">Где возникла проблема?</p>`;
-      html += `<div class="it-profile-loc">Из профиля: <strong>${esc(profLoc)}${profDesk ? ' (место ' + esc(profDesk) + ')' : ''}</strong></div>`;
-      html += `<div class="it-options">`;
-      html += `<button class="it-option" data-loc="${esc(profLoc)}" data-desk="${esc(profDesk || '')}">Да, ${esc(profLoc)}</button>`;
-      html += `<button class="it-option" id="itChooseOtherLoc">Другое место</button>`;
-      html += `</div>`;
-      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
-    } else {
-      html += `<p class="it-step-title">Где возникла проблема?</p><div class="it-options">`;
-      for (const loc of IT_LOCATIONS) {
-        html += `<button class="it-option" data-loc="${esc(loc)}">
-          ${esc(loc)}
-        </button>`;
-      }
-      html += '</div>';
-      html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
-    }
-
-  } else if (step === 4) {
-    html += `<p class="it-step-title">Укажите номер места</p>`;
-    html += `<div class="it-seat-group">
-      <label>Номер места (1–260)</label>
-      <input id="itSeatInput" type="number" min="1" max="260" placeholder="Номер места" />
-    </div>`;
-    html += `<button class="it-submit-btn" id="itSeatNext">Далее</button>`;
-    html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
-
-  } else if (step === 5) {
-    html += `<p class="it-step-title">Опишите детали проблемы</p>`;
-    html += `<div class="it-desc-group">
-      <label>Описание (можно «-» чтобы пропустить)</label>
-      <textarea id="itDescInput" rows="4" placeholder="Подробности проблемы..."></textarea>
-    </div>`;
-    html += `<button class="it-submit-btn" id="itSubmitBtn">Отправить</button>`;
-    html += `<button class="it-back-btn" id="itBackBtn">Назад</button>`;
-  }
-
-  itWizard.innerHTML = html;
-  bindItEvents();
-}
-
-function bindItEvents() {
-  const t = state.itTicket;
-
-  // Step 1: category selection
-  itWizard.querySelectorAll('[data-cat]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      const catId = btn.dataset.cat;
-      const cat = IT_CATEGORIES.find((c) => c.id === catId);
-      if (cat && cat.disabled) return;
-      t.category = catId;
-      t.step = 2;
-      msg(itTicketMessage, '');
-      renderItStep();
-    });
-  });
-
-  // Step 2: subcategory selection
-  itWizard.querySelectorAll('[data-sub]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      t.subcategory = btn.dataset.sub;
-      t.step = 3;
-      msg(itTicketMessage, '');
-      renderItStep();
-    });
-  });
-
-  // Step 2 "other" next button
-  const otherNext = $('itOtherNext');
-  if (otherNext) {
-    otherNext.addEventListener('click', () => {
-      const desc = $('itOtherDesc').value.trim();
-      if (!desc || desc.length < 3) {
-        msg(itTicketMessage, 'Опишите проблему (минимум 3 символа).', 'error');
-        return;
-      }
-      t.subcategory = desc;
-      t.description = desc;
-      t.step = 3;
-      msg(itTicketMessage, '');
-      renderItStep();
-    });
-  }
-
-  // Step 3: location selection
-  itWizard.querySelectorAll('[data-loc]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      t.location = btn.dataset.loc;
-      // If desk pre-filled from profile
-      if (btn.dataset.desk) {
-        t.seat = btn.dataset.desk;
-        t.step = 5;
-      } else if (t.location === 'Офис 2 этаж') {
-        t.step = 4;
-      } else {
-        t.seat = '';
-        t.step = 5;
-      }
-      msg(itTicketMessage, '');
-      renderItStep();
-    });
-  });
-
-  // "Choose other location" button (when profile location suggested)
-  const otherLocBtn = document.getElementById('itChooseOtherLoc');
-  if (otherLocBtn) {
-    otherLocBtn.addEventListener('click', () => {
-      t._showAllLocations = true;
-      msg(itTicketMessage, '');
-      renderItStep();
-    });
-  }
-
-  // Step 4: seat number
-  const seatNext = $('itSeatNext');
-  if (seatNext) {
-    seatNext.addEventListener('click', () => {
-      const val = Number($('itSeatInput').value);
-      if (!val || val < 1 || val > 260) {
-        msg(itTicketMessage, 'Укажите номер места от 1 до 260.', 'error');
-        return;
-      }
-      t.seat = String(val);
-      t.step = 5;
-      msg(itTicketMessage, '');
-      renderItStep();
-    });
-  }
-
-  // Step 5: submit
-  const submitBtn = $('itSubmitBtn');
-  if (submitBtn) {
-    submitBtn.addEventListener('click', async () => {
-      const desc = $('itDescInput').value.trim() || '-';
-      if (t.category !== 'other') t.description = desc;
-      msg(itTicketMessage, '');
-      submitBtn.disabled = true;
-      try {
-        const result = await api('/api/it-tickets', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            pin: state.pin,
-            category: t.category,
-            subcategory: t.subcategory || '',
-            location: t.location,
-            seat: t.seat,
-            description: t.description
-          })
-        });
-        msg(itTicketMessage, result.message, 'success');
-        loadMyItTickets();
-        setTimeout(() => resetItWizard(), 2000);
-      } catch (err) {
-        msg(itTicketMessage, err.message, 'error');
-        submitBtn.disabled = false;
-      }
-    });
-  }
-
-  // Back button
-  const backBtn = $('itBackBtn');
-  if (backBtn) {
-    backBtn.addEventListener('click', () => {
-      msg(itTicketMessage, '');
-      if (t.step === 5) {
-        if (t.location === 'Офис 2 этаж') { t.seat = ''; t.step = 4; }
-        else { t.step = 3; }
-      } else if (t.step === 4) {
-        t.location = null;
-        t.step = 3;
-      } else if (t.step === 3) {
-        if (t._showAllLocations) { t._showAllLocations = false; renderItStep(); return; }
-        t.subcategory = null;
-        t.location = null;
-        if (t.category === 'other') { t.description = ''; }
-        t.step = 2;
-      } else if (t.step === 2) {
-        t.category = null;
-        t.subcategory = null;
-        t.description = '';
-        t.step = 1;
-      }
-      renderItStep();
-    });
-  }
-}
-
 /* ── Admin panel ── */
 
 const pinRequestsBadge = $('pinRequestsBadge');
@@ -1350,31 +1098,81 @@ async function updatePinBadge() {
   } catch { hide(pinRequestsBadge); }
 }
 
+function canAccessAdminTab(tabId) {
+  if (state.adminRole === 'superadmin') return true;
+  const p = state.permissions;
+  if (!p || !p.admin_sections) return false;
+  if (p.admin_sections === '*') return true;
+  return p.admin_sections.includes(tabId);
+}
+
+/* ── Notification bell events ── */
+notifBell?.addEventListener('click', (e) => {
+  e.stopPropagation();
+  notifPanel.classList.toggle('hidden');
+  if (!notifPanel.classList.contains('hidden')) loadNotifications();
+});
+
+$('notifReadAll')?.addEventListener('click', async () => {
+  try {
+    await api('/api/notifications/read', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ids: 'all' })
+    });
+    notifBadge.textContent = '';
+    notifList.querySelectorAll('.unread').forEach(el => el.classList.remove('unread'));
+  } catch { /* ignore */ }
+});
+
+notifList?.addEventListener('click', async (e) => {
+  const item = e.target.closest('.notif-item');
+  if (!item) return;
+  const nid = item.dataset.nid;
+  const link = item.dataset.link;
+  if (item.classList.contains('unread')) {
+    item.classList.remove('unread');
+    try {
+      await api('/api/notifications/read', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ ids: [nid] })
+      });
+      loadNotifCount();
+    } catch { /* ignore */ }
+  }
+  if (link) {
+    notifPanel.classList.add('hidden');
+    location.hash = link;
+  }
+});
+
+document.addEventListener('click', (e) => {
+  if (notifPanel && !notifPanel.classList.contains('hidden') && !notifPanel.contains(e.target) && e.target !== notifBell && !notifBell.contains(e.target)) {
+    notifPanel.classList.add('hidden');
+  }
+});
+
 adminBtn.addEventListener('click', () => {
   document.querySelectorAll('.tab').forEach((t) => t.classList.remove('active'));
   document.querySelectorAll('.panel').forEach((p) => p.classList.remove('active'));
   $('panelAdmin').classList.add('active');
 
-  // Filter admin tabs by role
-  const allAdminTabs = document.querySelectorAll('.admin-tab');
-  const superOnly = ['bookings', 'tickets', 'suggestions', 'users', 'pin-requests', 'crm-config', 'roles'];
-  allAdminTabs.forEach((tab) => {
-    if (state.adminRole === 'it_admin' && superOnly.includes(tab.dataset.atab)) {
-      hide(tab);
-    } else {
-      show(tab);
-    }
+  // Show/hide admin tabs based on permissions
+  let firstVisible = null;
+  document.querySelectorAll('.admin-tab').forEach((tab) => {
+    const tabId = tab.dataset.atab;
+    const allowed = canAccessAdminTab(tabId);
+    tab.style.display = allowed ? '' : 'none';
+    if (allowed && !firstVisible) firstVisible = tabId;
   });
-
-  if (state.adminRole === 'it_admin') {
-    allAdminTabs.forEach((t) => t.classList.remove('active'));
-    const itTab = [...allAdminTabs].find((t) => t.dataset.atab === 'it-tickets');
-    if (itTab) itTab.classList.add('active');
-    loadAdminData('it-tickets');
-  } else {
-    loadAdminData('bookings');
-    updatePinBadge();
+  if (firstVisible) {
+    document.querySelectorAll('.admin-tab').forEach(t => t.classList.remove('active'));
+    const firstTab = document.querySelector(`.admin-tab[data-atab="${firstVisible}"]`);
+    if (firstTab) firstTab.classList.add('active');
+    loadAdminData(firstVisible);
   }
+  updatePinBadge();
 });
 
 document.querySelectorAll('.admin-tab').forEach((tab) => {
@@ -1389,7 +1187,8 @@ const ADMIN_PAGE_SIZE = 50;
 
 async function loadAdminData(type, page) {
   if (type === 'crm-config') { await loadCrmConfigAdmin(); return; }
-  if (type === 'roles') { await loadRolesAdmin(); return; }
+  if (type === 'roles-access') { await renderRolesAccess(); return; }
+  if (type === 'roles') { await renderRolesAccess(); return; }
   if (page !== undefined) state.adminPage[type] = page;
   const currentPage = state.adminPage[type] || 1;
   try {
@@ -1502,62 +1301,300 @@ function fmtDate(iso) {
 
 let adminUsersCache = [];
 
-async function loadRolesAdmin() {
+/* ── Roles & Access admin tab ── */
+
+async function renderRolesAccess() {
+  adminContent.innerHTML = '<p class="admin-empty">Загрузка...</p>';
   try {
-    const roles = await api('/api/roles');
-    state.roles = roles;
-    let html = '<h3 style="margin:0 0 12px">Ролевая модель</h3>';
-    html += '<table class="admin-table"><tr><th>ID</th><th>Название</th><th>Описание</th><th></th></tr>';
+    const data = await api('/api/admin/access');
+    const { roles = [], groups = [], boards = [], kb_categories: kbCats = [], users = [], adminSections = [], features = [] } = data;
+
+    let html = '';
+
+    /* ── Section A: Roles ── */
+    html += '<div class="roles-access-section">';
+    html += '<h3>Роли</h3>';
+    html += '<button class="btn-primary btn-sm" id="raCreateRoleBtn">+ Создать роль</button>';
+    html += '<div id="raRoleForm" class="hidden" style="margin:12px 0"></div>';
+    html += '<table class="admin-table" id="raRolesTable"><tr><th>Название</th><th>Описание</th><th></th><th></th></tr>';
     for (const r of roles) {
-      html += `<tr>
-        <td><code>${esc(r.id)}</code></td>
-        <td>${esc(r.name)}</td>
-        <td>${esc(r.description || '')}</td>
-        <td>${r.system ? '<span style="color:var(--text-sec);font-size:12px">системная</span>' : `<button class="btn-cancel-sm" data-role-id="${esc(r.id)}">Удалить</button>`}</td>
-      </tr>`;
+      html += '<tr><td>' + esc(r.name) + '</td><td>' + esc(r.description || '') + '</td>';
+      html += '<td>' + (r.system ? '<span class="role-badge-system">системная</span>' : '') + '</td>';
+      html += '<td>';
+      html += '<button class="btn-edit-user ra-role-edit" data-rid="' + esc(r.id) + '">Ред.</button> ';
+      if (!r.system) html += '<button class="btn-cancel-sm ra-role-del" data-rid="' + esc(r.id) + '">Удалить</button>';
+      html += '</td></tr>';
+      html += '<tr class="hidden" id="raRoleDetail_' + esc(r.id) + '"><td colspan="4"><div class="ra-role-detail"></div></td></tr>';
     }
     html += '</table>';
-    html += `<div style="margin-top:12px;display:flex;gap:8px;flex-wrap:wrap;align-items:end">
-      <label style="flex:1;min-width:120px">Название<input id="newRoleName" placeholder="Менеджер проекта" /></label>
-      <label style="flex:2;min-width:150px">Описание<input id="newRoleDesc" placeholder="Доступ к доскам проекта" /></label>
-      <button class="btn-primary btn-sm" id="addRoleBtn">Создать роль</button>
-    </div>`;
-    html += '<p id="rolesMsg" class="message" style="margin-top:8px"></p>';
+    html += '</div>';
+
+    /* ── Section B: Groups ── */
+    html += '<div class="roles-access-section">';
+    html += '<h3>Группы</h3>';
+    html += '<button class="btn-primary btn-sm" id="raCreateGroupBtn">+ Создать группу</button>';
+    html += '<div id="raGroupForm" class="hidden" style="margin:12px 0"></div>';
+    html += '<div class="ra-groups-grid" id="raGroupsGrid">';
+    for (const g of groups) {
+      html += '<div class="group-card" data-gid="' + esc(g.id) + '">';
+      html += '<div class="group-card-header"><strong>' + esc(g.name) + '</strong><span style="color:var(--text-sec);font-size:12px">' + (g.members || []).length + ' уч.</span></div>';
+      if (g.description) html += '<p style="font-size:12px;color:var(--text-sec);margin:4px 0">' + esc(g.description) + '</p>';
+      html += '<button class="btn-sm btn-secondary ra-group-edit" data-gid="' + esc(g.id) + '">Настроить</button>';
+      html += '</div>';
+    }
+    if (!groups.length) html += '<p class="admin-empty">Групп нет</p>';
+    html += '</div></div>';
+
+    /* ── Section C: User Roles ── */
+    html += '<div class="roles-access-section">';
+    html += '<h3>Роли пользователей</h3>';
+    html += '<table class="admin-table" id="raUsersTable"><tr><th>ФИО</th><th>Роль</th><th>Группы</th></tr>';
+    for (const u of users) {
+      const userGroups = groups.filter(g => (g.members || []).includes(u.id)).map(g => esc(g.name)).join(', ') || '—';
+      const roleOpts = roles.map(r => '<option value="' + esc(r.id) + '"' + (r.id === (u.role || 'employee') ? ' selected' : '') + '>' + esc(r.name) + '</option>').join('');
+      html += '<tr><td>' + esc(u.fullName) + '</td>';
+      html += '<td><select class="ra-user-role" data-uid="' + esc(u.id) + '">' + roleOpts + '</select></td>';
+      html += '<td style="font-size:12px;color:var(--text-sec)">' + userGroups + '</td></tr>';
+    }
+    html += '</table></div>';
+
     adminContent.innerHTML = html;
 
-    // Bind delete
-    adminContent.querySelectorAll('[data-role-id]').forEach(btn => {
-      btn.addEventListener('click', async () => {
-        if (!confirm(`Удалить роль "${btn.dataset.roleId}"?`)) return;
+    /* ── Build permission checkboxes helper ── */
+    function permCheckboxes(prefix, perms, readonly) {
+      const dis = readonly ? ' disabled checked' : '';
+      let h = '<div class="perm-grid">';
+      if (adminSections.length) {
+        h += '<div class="perm-group"><h4>Разделы админки</h4>';
+        for (const s of adminSections) {
+          const ck = readonly || (perms.admin_sections || []).includes(s.id) ? ' checked' : '';
+          h += '<label class="perm-label"><input type="checkbox" data-pcat="admin_sections" value="' + esc(s.id) + '"' + ck + dis + ' /> ' + esc(s.label) + '</label>';
+        }
+        h += '</div>';
+      }
+      if (boards.length) {
+        h += '<div class="perm-group"><h4>Доски ТЗ</h4>';
+        for (const b of boards) {
+          const ck = readonly || (perms.boards || []).includes(b.id) ? ' checked' : '';
+          h += '<label class="perm-label"><input type="checkbox" data-pcat="boards" value="' + esc(b.id) + '"' + ck + dis + ' /> ' + esc(b.name) + '</label>';
+        }
+        h += '</div>';
+      }
+      if (kbCats.length) {
+        h += '<div class="perm-group"><h4>Категории базы знаний</h4>';
+        for (const c of kbCats) {
+          const ck = readonly || (perms.kb_categories || []).includes(c.id) ? ' checked' : '';
+          h += '<label class="perm-label"><input type="checkbox" data-pcat="kb_categories" value="' + esc(c.id) + '"' + ck + dis + ' /> ' + esc(c.name) + '</label>';
+        }
+        h += '</div>';
+      }
+      if (features.length) {
+        h += '<div class="perm-group"><h4>Функции</h4>';
+        for (const f of features) {
+          const ck = readonly || (perms.features || []).includes(f.id) ? ' checked' : '';
+          h += '<label class="perm-label"><input type="checkbox" data-pcat="features" value="' + esc(f.id) + '"' + ck + dis + ' /> ' + esc(f.label) + '</label>';
+        }
+        h += '</div>';
+      }
+      h += '</div>';
+      return h;
+    }
+
+    function gatherPerms(container) {
+      const perms = { admin_sections: [], boards: [], kb_categories: [], features: [] };
+      container.querySelectorAll('input[data-pcat]:checked:not(:disabled)').forEach(cb => {
+        const cat = cb.dataset.pcat;
+        if (perms[cat]) perms[cat].push(cb.value);
+      });
+      return perms;
+    }
+
+    /* ── Role inline form (create) ── */
+    function showRoleCreateForm() {
+      const formEl = $('raRoleForm');
+      formEl.classList.remove('hidden');
+      formEl.innerHTML = '<div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg-soft)">' +
+        '<label>Название <input id="raNewRoleName" placeholder="Менеджер проекта" /></label>' +
+        '<label style="margin-top:8px">Описание <input id="raNewRoleDesc" placeholder="Описание роли" /></label>' +
+        '<h4 style="margin:12px 0 8px">Разрешения</h4>' +
+        permCheckboxes('new', {}, false) +
+        '<div style="margin-top:12px;display:flex;gap:8px">' +
+        '<button class="btn-primary btn-sm" id="raNewRoleSave">Сохранить</button>' +
+        '<button class="btn-outline-dark btn-sm" id="raNewRoleCancel">Отмена</button></div>' +
+        '<p id="raNewRoleMsg" class="message"></p></div>';
+      $('raNewRoleCancel').addEventListener('click', () => { formEl.classList.add('hidden'); formEl.innerHTML = ''; });
+      $('raNewRoleSave').addEventListener('click', async () => {
+        const name = $('raNewRoleName').value.trim();
+        if (!name) { msg($('raNewRoleMsg'), 'Укажите название', 'error'); return; }
+        const permissions = gatherPerms(formEl);
         try {
-          await api(`/api/admin/roles/${btn.dataset.roleId}`, {
-            method: 'DELETE', headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin })
+          await api('/api/admin/access/roles', {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+            body: JSON.stringify({ name, description: $('raNewRoleDesc').value.trim(), permissions })
+          });
+          showToast('Роль создана', 'ok');
+          await renderRolesAccess();
+        } catch (err) { msg($('raNewRoleMsg'), err.message, 'error'); }
+      });
+    }
+
+    $('raCreateRoleBtn').addEventListener('click', showRoleCreateForm);
+
+    /* ── Role edit (inline expand) ── */
+    adminContent.querySelectorAll('.ra-role-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const rid = btn.dataset.rid;
+        const detailRow = $('raRoleDetail_' + rid);
+        if (!detailRow) return;
+        if (!detailRow.classList.contains('hidden')) { detailRow.classList.add('hidden'); return; }
+        const role = roles.find(r => r.id === rid);
+        if (!role) return;
+        const isSuperadmin = role.id === 'superadmin';
+        const perms = role.permissions || {};
+        const det = detailRow.querySelector('.ra-role-detail');
+        det.innerHTML = '<div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg-soft)">' +
+          '<label>Название <input class="raEditName" value="' + esc(role.name) + '"' + (isSuperadmin ? ' disabled' : '') + ' /></label>' +
+          '<label style="margin-top:8px">Описание <input class="raEditDesc" value="' + esc(role.description || '') + '"' + (isSuperadmin ? ' disabled' : '') + ' /></label>' +
+          '<h4 style="margin:12px 0 8px">Разрешения' + (isSuperadmin ? ' <span style="font-weight:400;font-size:12px;color:var(--text-sec)">(суперадмин — полный доступ)</span>' : '') + '</h4>' +
+          permCheckboxes('edit', perms, isSuperadmin) +
+          (!isSuperadmin ? '<div style="margin-top:12px;display:flex;gap:8px">' +
+            '<button class="btn-primary btn-sm raEditSave">Сохранить</button>' +
+            '<button class="btn-outline-dark btn-sm raEditCancel">Отмена</button></div>' : '') +
+          '<p class="raEditMsg message"></p></div>';
+        detailRow.classList.remove('hidden');
+
+        det.querySelector('.raEditCancel')?.addEventListener('click', () => detailRow.classList.add('hidden'));
+        det.querySelector('.raEditSave')?.addEventListener('click', async () => {
+          const name = det.querySelector('.raEditName').value.trim();
+          if (!name) { msg(det.querySelector('.raEditMsg'), 'Укажите название', 'error'); return; }
+          const permissions = gatherPerms(det);
+          try {
+            await api('/api/admin/access/roles/' + encodeURIComponent(rid), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+              body: JSON.stringify({ name, description: det.querySelector('.raEditDesc').value.trim(), permissions })
+            });
+            showToast('Роль обновлена', 'ok');
+            await renderRolesAccess();
+          } catch (err) { msg(det.querySelector('.raEditMsg'), err.message, 'error'); }
+        });
+      });
+    });
+
+    /* ── Role delete ── */
+    adminContent.querySelectorAll('.ra-role-del').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Удалить роль?')) return;
+        try {
+          await api('/api/admin/access/roles/' + encodeURIComponent(btn.dataset.rid), {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+            body: JSON.stringify({})
           });
           showToast('Роль удалена', 'ok');
-          loadRolesAdmin();
+          await renderRolesAccess();
         } catch (err) { showToast(err.message, 'danger'); }
       });
     });
 
-    // Bind create
-    $('addRoleBtn')?.addEventListener('click', async () => {
-      const name = $('newRoleName').value.trim();
-      const description = $('newRoleDesc').value.trim();
-      if (!name) { msg($('rolesMsg'), 'Укажите название', 'error'); return; }
-      try {
-        await api('/api/admin/roles', {
-          method: 'POST', headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, name, description })
+    /* ── Group create form ── */
+    function showGroupForm(group) {
+      const isEdit = !!group;
+      const formEl = $('raGroupForm');
+      formEl.classList.remove('hidden');
+      const perms = (isEdit && group.permissions) ? group.permissions : {};
+      const members = isEdit ? (group.members || []) : [];
+      formEl.innerHTML = '<div style="border:1px solid var(--border);border-radius:10px;padding:16px;background:var(--bg-soft)">' +
+        '<label>Название <input id="raGrpName" value="' + (isEdit ? esc(group.name) : '') + '" placeholder="Название группы" /></label>' +
+        '<label style="margin-top:8px">Описание <input id="raGrpDesc" value="' + (isEdit ? esc(group.description || '') : '') + '" placeholder="Описание" /></label>' +
+        '<h4 style="margin:12px 0 8px">Участники</h4>' +
+        '<input id="raGrpMemberSearch" placeholder="Поиск по ФИО..." style="margin-bottom:8px;width:100%" />' +
+        '<div class="member-list" id="raGrpMembers">' +
+        users.map(u => '<label class="perm-label ra-member-item"><input type="checkbox" class="ra-member-cb" value="' + esc(u.id) + '"' + (members.includes(u.id) ? ' checked' : '') + ' /> ' + esc(u.fullName) + '</label>').join('') +
+        '</div>' +
+        '<h4 style="margin:12px 0 8px">Разрешения</h4>' +
+        permCheckboxes('grp', perms, false) +
+        '<div style="margin-top:12px;display:flex;gap:8px">' +
+        '<button class="btn-primary btn-sm" id="raGrpSave">' + (isEdit ? 'Сохранить' : 'Создать') + '</button>' +
+        (isEdit ? '<button class="btn-cancel-sm" id="raGrpDelete">Удалить группу</button>' : '') +
+        '<button class="btn-outline-dark btn-sm" id="raGrpCancel">Отмена</button></div>' +
+        '<p id="raGrpMsg" class="message"></p></div>';
+
+      $('raGrpMemberSearch').addEventListener('input', (e) => {
+        const q = e.target.value.toLowerCase();
+        formEl.querySelectorAll('.ra-member-item').forEach(item => {
+          item.style.display = item.textContent.toLowerCase().includes(q) ? '' : 'none';
         });
-        showToast('Роль создана', 'ok');
-        loadRolesAdmin();
-      } catch (err) { msg($('rolesMsg'), err.message, 'error'); }
+      });
+      $('raGrpCancel').addEventListener('click', () => { formEl.classList.add('hidden'); formEl.innerHTML = ''; });
+      $('raGrpSave').addEventListener('click', async () => {
+        const name = $('raGrpName').value.trim();
+        if (!name) { msg($('raGrpMsg'), 'Укажите название', 'error'); return; }
+        const selMembers = Array.from(formEl.querySelectorAll('.ra-member-cb:checked')).map(cb => cb.value);
+        const permissions = gatherPerms(formEl);
+        const body = { name, description: $('raGrpDesc').value.trim(), members: selMembers, permissions };
+        try {
+          if (isEdit) {
+            await api('/api/admin/access/groups/' + encodeURIComponent(group.id), {
+              method: 'PUT',
+              headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+              body: JSON.stringify(body)
+            });
+            showToast('Группа обновлена', 'ok');
+          } else {
+            await api('/api/admin/access/groups', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+              body: JSON.stringify(body)
+            });
+            showToast('Группа создана', 'ok');
+          }
+          await renderRolesAccess();
+        } catch (err) { msg($('raGrpMsg'), err.message, 'error'); }
+      });
+      $('raGrpDelete')?.addEventListener('click', async () => {
+        if (!confirm('Удалить группу?')) return;
+        try {
+          await api('/api/admin/access/groups/' + encodeURIComponent(group.id), {
+            method: 'DELETE',
+            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+            body: JSON.stringify({})
+          });
+          showToast('Группа удалена', 'ok');
+          await renderRolesAccess();
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    }
+
+    $('raCreateGroupBtn').addEventListener('click', () => showGroupForm(null));
+
+    adminContent.querySelectorAll('.ra-group-edit').forEach(btn => {
+      btn.addEventListener('click', () => {
+        const g = groups.find(x => x.id === btn.dataset.gid);
+        if (g) showGroupForm(g);
+      });
     });
+
+    /* ── User role dropdown ── */
+    adminContent.querySelectorAll('.ra-user-role').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        try {
+          await api('/api/admin/access/user-role', {
+            method: 'PUT',
+            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
+            body: JSON.stringify({ userId: sel.dataset.uid, roleId: sel.value })
+          });
+          showToast('Роль обновлена', 'ok');
+        } catch (err) { showToast(err.message, 'danger'); sel.value = sel.querySelector('option[selected]')?.value || 'employee'; }
+      });
+    });
+
   } catch (err) {
-    adminContent.innerHTML = `<p class="message error">${esc(err.message)}</p>`;
+    adminContent.innerHTML = '<p class="message error">' + esc(err.message) + '</p>';
   }
 }
+
 
 function renderAdminTable(type, response) {
   // Support both paginated {items, total, page, pageSize} and legacy array responses
@@ -1599,23 +1636,6 @@ function renderAdminTable(type, response) {
         <td>${esc(t.fullName)}</td>
       </tr>`;
     }
-  } else if (type === 'it-tickets') {
-    html += '<tr><th>Дата</th><th>Категория</th><th>Тип проблемы</th><th>Локация</th><th>Место</th><th>Описание</th><th>Кто</th><th>Статус</th><th>Оценка</th></tr>';
-    for (const t of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
-      const statusBadge = itStatusBadge(t.status);
-      const ratingStr = t.rating ? '★'.repeat(t.rating) + '☆'.repeat(5 - t.rating) : '—';
-      html += `<tr>
-        <td style="white-space:nowrap">${fmtDate(t.createdAt)}</td>
-        <td>${esc(t.category)}</td>
-        <td>${esc(t.subcategory)}</td>
-        <td>${esc(t.location)}</td>
-        <td>${esc(t.seat || '—')}</td>
-        <td class="desc-cell">${esc(t.description)}</td>
-        <td>${esc(t.fullName)}</td>
-        <td>${statusBadge}</td>
-        <td style="white-space:nowrap">${ratingStr}</td>
-      </tr>`;
-    }
   } else if (type === 'suggestions') {
     html += '<tr><th>Дата</th><th>Идея</th><th>Кто</th><th>Контакт</th></tr>';
     for (const s of data.sort((a, b) => b.createdAt.localeCompare(a.createdAt))) {
@@ -1628,7 +1648,7 @@ function renderAdminTable(type, response) {
     }
   } else if (type === 'users') {
     html += '<tr><th>ФИО</th><th>Контакт</th><th>Роль</th><th>Дата</th><th></th></tr>';
-    const roles = state.roles || [{ id: 'employee', name: 'Сотрудник' }, { id: 'it_admin', name: 'ИТ-админ' }, { id: 'superadmin', name: 'Суперадмин' }];
+    const roles = state.roles || [{ id: 'employee', name: 'Сотрудник' }, { id: 'superadmin', name: 'Суперадмин' }];
     for (const u of data) {
       const role = u.role || 'employee';
       const roleOpts = roles.map(r => `<option value="${esc(r.id)}"${r.id === role ? ' selected' : ''}>${esc(r.name)}</option>`).join('');
@@ -1758,97 +1778,6 @@ editUserForm.addEventListener('submit', async (e) => {
   }
 });
 
-/* ── IT Status helpers ── */
-
-function itStatusBadge(status) {
-  const map = {
-    new: ['Новая', 'status-new'],
-    in_progress: ['В работе', 'status-progress'],
-    done: ['Выполнено', 'status-done']
-  };
-  const [label, cls] = map[status] || ['Новая', 'status-new'];
-  return `<span class="it-status-badge ${cls}">${label}</span>`;
-}
-
-/* ── My IT Tickets ── */
-
-async function loadMyItTickets() {
-  if (!state.pin || !myItTicketsList) return;
-  try {
-    const tickets = await api('/api/my-it-tickets', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
-    });
-    renderMyItTickets(tickets);
-  } catch {
-    if (myItTicketsList) myItTicketsList.innerHTML = '';
-  }
-}
-
-function renderMyItTickets(tickets) {
-  if (!myItTicketsList) return;
-  if (!tickets.length) {
-    myItTicketsList.innerHTML = '<p class="my-it-empty">Вы пока не подавали ИТ-заявок</p>';
-    return;
-  }
-  myItTicketsList.innerHTML = tickets.map((t) => {
-    const badge = itStatusBadge(t.status);
-    const date = fmtDate(t.createdAt);
-    const desc = t.description.length > 80 ? t.description.slice(0, 80) + '...' : t.description;
-    let ratingHtml = '';
-    if (t.status === 'done' && t.rating) {
-      ratingHtml = `<span class="it-rating-done">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span>`;
-    } else if (t.status === 'done' && !t.rating) {
-      ratingHtml = `<span class="it-stars" data-ticket-id="${esc(t.id)}">${[1,2,3,4,5].map((n) =>
-        `<span class="it-star" data-star="${n}">★</span>`
-      ).join('')}</span>`;
-    }
-    const takenBy = t.takenBy ? ` · ${esc(t.takenBy)}` : '';
-    return `<div class="my-it-ticket">
-      <div class="my-it-ticket-header">
-        <span class="my-it-ticket-cat">${esc(t.category)}${t.subcategory && t.subcategory !== '—' ? ' — ' + esc(t.subcategory) : ''}</span>
-        <span class="my-it-ticket-date">${date}</span>
-      </div>
-      <div class="my-it-ticket-body">${esc(desc)}</div>
-      <div class="my-it-ticket-footer">
-        ${badge}${takenBy}
-        ${ratingHtml}
-      </div>
-    </div>`;
-  }).join('');
-
-  // Bind star rating events
-  myItTicketsList.querySelectorAll('.it-stars').forEach((starsEl) => {
-    const ticketId = starsEl.dataset.ticketId;
-    const stars = starsEl.querySelectorAll('.it-star');
-    stars.forEach((star) => {
-      star.addEventListener('mouseenter', () => {
-        const val = Number(star.dataset.star);
-        stars.forEach((s) => s.classList.toggle('hovered', Number(s.dataset.star) <= val));
-      });
-      star.addEventListener('mouseleave', () => {
-        stars.forEach((s) => s.classList.remove('hovered'));
-      });
-      star.addEventListener('click', () => rateItTicket(ticketId, Number(star.dataset.star)));
-    });
-  });
-}
-
-async function rateItTicket(ticketId, rating) {
-  try {
-    const result = await api('/api/it-ticket-rate', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, ticketId, rating })
-    });
-    msg(itTicketMessage, result.message, 'success');
-    loadMyItTickets();
-  } catch (err) {
-    msg(itTicketMessage, err.message, 'error');
-  }
-}
-
 /* ── Toast notifications ── */
 
 const toastContainer = $('toastContainer');
@@ -1866,6 +1795,58 @@ function dismissToast(el) {
   if (!el.parentNode) return;
   el.style.animation = 'toastFadeOut .3s ease-in forwards';
   el.addEventListener('animationend', () => el.remove());
+}
+
+/* ── Notifications ── */
+let _notifInterval = null;
+
+async function loadNotifCount() {
+  if (!state.pin) return;
+  try {
+    const { count } = await api('/api/notifications/unread-count');
+    notifBadge.textContent = count > 0 ? (count > 99 ? '99+' : count) : '';
+  } catch { /* ignore */ }
+}
+
+async function loadNotifications() {
+  if (!state.pin) return;
+  try {
+    const notifs = await api('/api/notifications');
+    if (!notifs.length) {
+      notifList.innerHTML = '<p class="notif-empty">Нет уведомлений</p>';
+      return;
+    }
+    notifList.innerHTML = notifs.map(n => {
+      const ago = timeAgo(n.created_at);
+      return `<div class="notif-item${n.read ? '' : ' unread'}" data-nid="${esc(n.id)}" data-link="${esc(n.link || '')}">
+        <div class="notif-item-title">${esc(n.title)}</div>
+        <div class="notif-item-body">${esc(n.body)}</div>
+        <div class="notif-item-time">${ago}</div>
+      </div>`;
+    }).join('');
+  } catch { notifList.innerHTML = '<p class="notif-empty">Ошибка загрузки</p>'; }
+}
+
+function timeAgo(dateStr) {
+  const diff = Date.now() - new Date(dateStr).getTime();
+  const mins = Math.floor(diff / 60000);
+  if (mins < 1) return 'только что';
+  if (mins < 60) return mins + ' мин назад';
+  const hrs = Math.floor(mins / 60);
+  if (hrs < 24) return hrs + ' ч назад';
+  const days = Math.floor(hrs / 24);
+  if (days < 7) return days + ' д назад';
+  return new Date(dateStr).toLocaleDateString('ru-RU');
+}
+
+function startNotifPolling() {
+  loadNotifCount();
+  if (_notifInterval) clearInterval(_notifInterval);
+  _notifInterval = setInterval(loadNotifCount, 60000);
+}
+
+function stopNotifPolling() {
+  if (_notifInterval) { clearInterval(_notifInterval); _notifInterval = null; }
 }
 
 /* ── TZ Badge & Notifications ── */
@@ -2100,6 +2081,7 @@ function renderTzFilters() {
       <select class="tz-filter-select" id="tzFilterStatus">${statusOpts}</select>
       <select class="tz-filter-select" id="tzFilterType">${typeOpts}</select>
       <select class="tz-filter-select" id="tzFilterPriority">${prioOpts}</select>
+      <input class="tz-filter-search tz-filter-tag-input" id="tzFilterTag" placeholder="Метка..." value="${esc(f.tag || '')}" />
       <input class="tz-filter-search" id="tzFilterSearch" placeholder="Поиск..." value="${esc(f.search)}" />
       <div class="tz-filter-actions">
         ${isSA ? `<button class="tz-export-btn" id="tzExportBtn" type="button">&#x1F4E5; Excel</button>
@@ -2143,6 +2125,14 @@ function renderTzFilters() {
   bindChange('tzFilterMissingDeadline', 'missing_deadline');
   bindChange('tzFilterNoDates', 'no_dates');
   bindChange('tzFilterNoOwner', 'no_owner');
+
+  const tagEl = document.getElementById('tzFilterTag');
+  if (tagEl) {
+    tagEl.addEventListener('input', () => {
+      clearTimeout(_tzSearchTimer);
+      _tzSearchTimer = setTimeout(() => { state.tzFilters.tag = tagEl.value; loadTzData(); }, 300);
+    });
+  }
 
   const searchEl = document.getElementById('tzFilterSearch');
   if (searchEl) {
@@ -2315,7 +2305,7 @@ function renderTzList(items) {
     html += `<tr class="${rowCls}" data-tz-id="${esc(tz.id)}">
       ${isSA ? `<td class="tz-cb-td" onclick="event.stopPropagation()"><input type="checkbox" class="tz-bulk-cb" value="${esc(tz.id)}" /></td>` : ''}
       <td class="tz-code-cell">${esc(tz.tz_code)}</td>
-      <td class="tz-title-cell">${esc(tz.title)}</td>
+      <td class="tz-title-cell">${esc(tz.title)}${(tz.tags||[]).map(t=>`<span class="tz-tag">${esc(t)}</span>`).join('')}${tz.estimate ? `<span class="tz-estimate">${esc(tz.estimate)}</span>` : ''}</td>
       <td>${esc(tz.system)}</td>
       <td>${esc(tz.type)}</td>
       <td>${tzPrioBadge(tz.priority)}</td>
@@ -2591,6 +2581,8 @@ async function openTzDetail(id) {
     $('tzDateDev').value = data.date_dev_deadline || '';
     $('tzDateRelease').value = data.date_release_deadline || '';
     $('tzCompletionNotes').value = data.completion_notes || '';
+    $('tzTags').value = (data.tags || []).join(', ');
+    $('tzEstimate').value = data.estimate || '';
 
     // Status select — use board columns if available
     const detailBoard = data.board_id ? state.tzBoards.find(b => b.id === data.board_id) : getCurrentBoard();
@@ -2875,7 +2867,9 @@ tzForm.addEventListener('submit', async (e) => {
     date_release_deadline: $('tzDateRelease').value || '',
     completion_notes: $('tzCompletionNotes').value.trim(),
     assignee_id: $('tzAssignee').value || '',
-    deadline: $('tzDeadline').value || ''
+    deadline: $('tzDeadline').value || '',
+    tags: $('tzTags').value.split(',').map(t => t.trim()).filter(Boolean),
+    estimate: $('tzEstimate').value
   };
 
   try {
@@ -2907,91 +2901,6 @@ tzForm.addEventListener('submit', async (e) => {
 // TZ popup close
 tzCancelBtn.addEventListener('click', () => hide(tzPopup));
 tzPopup.addEventListener('click', (e) => { if (e.target === tzPopup && confirm('Закрыть окно?')) hide(tzPopup); });
-
-/* ── IT Status page (standalone, for sysadmin) ── */
-
-function renderItStatusPage(ticketId) {
-  document.title = 'ИТ-заявка — Статус';
-  document.body.innerHTML = `<div class="it-status-page"><div class="it-status-card" id="itStatusCard">
-    <h2>🔧 ИТ-заявка</h2>
-    <p style="color:var(--text-sec)">Загрузка...</p>
-  </div></div>`;
-  loadItStatus(ticketId);
-}
-
-async function loadItStatus(ticketId) {
-  const card = document.getElementById('itStatusCard');
-  try {
-    const t = await api(`/api/it-ticket-status/${ticketId}`);
-    const badge = itStatusBadge(t.status);
-    const date = fmtDate(t.createdAt);
-    let actionsHtml = '';
-    if (t.status === 'new') {
-      actionsHtml = `
-        <input id="itTakenByInput" class="it-taken-input" placeholder="Ваше имя (необязательно)" />
-        <div class="it-status-actions">
-          <button class="btn-primary" id="itTakeBtn">Взять в работу</button>
-        </div>`;
-    } else if (t.status === 'in_progress') {
-      actionsHtml = `<div class="it-status-actions">
-        <button class="btn-primary" id="itDoneBtn">Выполнено</button>
-      </div>`;
-    }
-
-    card.innerHTML = `
-      <h2>🔧 ИТ-заявка</h2>
-      <div class="it-status-field"><span class="it-status-label">Категория</span><span class="it-status-value">${esc(t.category)}${t.subcategory && t.subcategory !== '—' ? ' — ' + esc(t.subcategory) : ''}</span></div>
-      <div class="it-status-field"><span class="it-status-label">Локация</span><span class="it-status-value">${esc(t.location)}${t.seat ? ' (место ' + esc(t.seat) + ')' : ''}</span></div>
-      <div class="it-status-field"><span class="it-status-label">Описание</span><span class="it-status-value">${esc(t.description)}</span></div>
-      <div class="it-status-field"><span class="it-status-label">От</span><span class="it-status-value">${esc(t.fullName)} (${esc(t.contact)})</span></div>
-      <div class="it-status-field"><span class="it-status-label">Создана</span><span class="it-status-value">${date}</span></div>
-      <div class="it-status-field"><span class="it-status-label">Статус</span><span class="it-status-value">${badge}${t.takenBy ? ' · ' + esc(t.takenBy) : ''}</span></div>
-      ${t.rating ? `<div class="it-status-field"><span class="it-status-label">Оценка</span><span class="it-status-value">${'★'.repeat(t.rating)}${'☆'.repeat(5 - t.rating)}</span></div>` : ''}
-      ${actionsHtml}
-      <p class="it-status-msg" id="itStatusMsg"></p>`;
-
-    const takeBtn = document.getElementById('itTakeBtn');
-    if (takeBtn) {
-      takeBtn.addEventListener('click', async () => {
-        const takenBy = (document.getElementById('itTakenByInput')?.value || '').trim();
-        takeBtn.disabled = true;
-        try {
-          await api(`/api/it-ticket-status/${ticketId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'take', takenBy })
-          });
-          loadItStatus(ticketId);
-        } catch (err) {
-          const m = document.getElementById('itStatusMsg');
-          if (m) { m.textContent = err.message; m.className = 'it-status-msg error'; }
-          takeBtn.disabled = false;
-        }
-      });
-    }
-
-    const doneBtn = document.getElementById('itDoneBtn');
-    if (doneBtn) {
-      doneBtn.addEventListener('click', async () => {
-        doneBtn.disabled = true;
-        try {
-          await api(`/api/it-ticket-status/${ticketId}`, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action: 'done' })
-          });
-          loadItStatus(ticketId);
-        } catch (err) {
-          const m = document.getElementById('itStatusMsg');
-          if (m) { m.textContent = err.message; m.className = 'it-status-msg error'; }
-          doneBtn.disabled = false;
-        }
-      });
-    }
-  } catch (err) {
-    card.innerHTML = `<h2>🔧 ИТ-заявка</h2><p class="it-status-msg error">${esc(err.message)}</p>`;
-  }
-}
 
 /* ── Kanban view ── */
 
@@ -3037,8 +2946,9 @@ function kanbanCardHtml(tz, mini) {
   return `<div class="kanban-card${mini ? ' kanban-card-mini' : ''}" draggable="true" data-tz-id="${esc(tz.id)}" data-status="${esc(tz.status)}">
     <div class="kanban-card-prio kanban-prio-${esc(tz.priority)}"></div>
     <div class="kanban-card-body">
-      <div class="kanban-card-code">${esc(tz.tz_code)}${deadlineHtml}</div>
+      <div class="kanban-card-code">${esc(tz.tz_code)}${deadlineHtml}${tz.estimate ? `<span class="kanban-estimate">${esc(tz.estimate)}</span>` : ''}</div>
       <div class="kanban-card-title">${esc(tz.title)}</div>
+      ${!mini && (tz.tags||[]).length ? `<div class="kanban-tags-row">${(tz.tags||[]).map(t=>`<span class="kanban-tag">${esc(t)}</span>`).join('')}</div>` : ''}
       ${mini ? '' : ownerHtml}
       ${notesHtml}${flagsHtml}
     </div>
@@ -3074,7 +2984,7 @@ function renderKanban(data) {
     html += `<div class="kanban-column${wipOver ? ' kanban-wip-over' : ''}" data-status="${esc(status)}">
       <div class="kanban-column-header" style="background:${color}">
         <span class="kanban-col-title">${esc(statusLabels[status] || status)}</span>
-        <span class="kanban-col-count">${cards.length}${wipLimit ? `/${wipLimit}` : ''}</span>
+        <span class="kanban-col-count">${cards.length}${wipLimit ? `/${wipLimit}` : ''}</span>${wipOver ? '<span class="wip-warning">WIP!</span>' : ''}
       </div>
       <div class="kanban-cards">`;
 
@@ -3573,7 +3483,6 @@ async function renderKbCategories() {
 
   let toolbarHtml = '<div class="kb-toolbar-row"><h2 class="kb-section-title">База знаний</h2>';
   if (isSuperadmin) {
-    toolbarHtml += '<button class="btn-sm btn-outline-dark" id="kbManageGroupsBtn" type="button" title="Группы доступа"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg> Группы</button>';
     toolbarHtml += '<button class="kb-gear-btn" id="kbManageCatsBtn" type="button" title="Управление категориями"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/></svg></button>';
   }
   toolbarHtml += '</div><div class="kb-search-row"><input class="kb-search-input" id="kbSearchInput" placeholder="Поиск по статьям..." /></div>';
@@ -3581,7 +3490,6 @@ async function renderKbCategories() {
 
   if (isSuperadmin) {
     document.getElementById('kbManageCatsBtn')?.addEventListener('click', openKbCategoriesManager);
-    document.getElementById('kbManageGroupsBtn')?.addEventListener('click', openKbGroupsManager);
   }
 
   document.getElementById('kbSearchInput')?.addEventListener('input', (e) => {
@@ -3760,6 +3668,7 @@ async function renderKbArticle() {
     let toolbarHtml = '<div class="kb-toolbar-row">';
     if (articleCanEdit) {
       toolbarHtml += `<button class="btn-sm btn-kb-manage" id="kbEditArticleBtn">Редактировать</button>`;
+      toolbarHtml += `<button class="btn-sm btn-outline-dark" id="kbHistoryArticleBtn">История</button>`;
       toolbarHtml += `<button class="btn-sm btn-outline-dark" id="kbShareArticleBtn">Поделиться</button>`;
       toolbarHtml += `<button class="btn-sm btn-danger-outline-sm" id="kbDeleteArticleBtn">Удалить</button>`;
     }
@@ -3775,6 +3684,7 @@ async function renderKbArticle() {
 
     if (articleCanEdit) {
       document.getElementById('kbEditArticleBtn')?.addEventListener('click', () => openKbEditor(article));
+      document.getElementById('kbHistoryArticleBtn')?.addEventListener('click', () => showKbHistory(article.id));
       document.getElementById('kbShareArticleBtn')?.addEventListener('click', () => openKbSharePopup(article));
       document.getElementById('kbDeleteArticleBtn')?.addEventListener('click', async () => {
         if (!confirm('Удалить статью?')) return;
@@ -3906,6 +3816,59 @@ async function openKbEditor(article) {
   kbEditorTitleInput.value = article ? article.title : '';
   kbEditorPinned.checked = article ? !!article.pinned : false;
 
+  // Remove old template selectors / save-as-template buttons if any
+  document.getElementById('kbTplLabel')?.remove();
+  document.getElementById('kbSaveAsTemplateBtn')?.remove();
+
+  // Templates (only for new articles)
+  if (!article) {
+    try {
+      const templates = await api('/api/kb/templates');
+      if (templates.length) {
+        const tplSelect = document.createElement('select');
+        tplSelect.id = 'kbTplSelect';
+        tplSelect.innerHTML = '<option value="">Без шаблона</option>' + templates.map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`).join('');
+        tplSelect.style.marginBottom = '8px';
+        const label = document.createElement('label');
+        label.id = 'kbTplLabel';
+        label.textContent = 'Шаблон ';
+        label.appendChild(tplSelect);
+        kbEditorForm.insertBefore(label, kbEditorPinned.parentNode || kbEditorForm.querySelector('.kb-editor-area'));
+        tplSelect.addEventListener('change', async () => {
+          if (!tplSelect.value) return;
+          const tpl = await api(`/api/kb/templates/${tplSelect.value}`);
+          if (tpl.content && state.kbQuill) {
+            state.kbQuill.root.innerHTML = tpl.content;
+          }
+        });
+      }
+    } catch { /* ignore */ }
+  }
+
+  // "Save as template" button for superadmins (when editing existing article)
+  if (article && state.adminRole === 'superadmin') {
+    const saveBtn = document.createElement('button');
+    saveBtn.type = 'button';
+    saveBtn.id = 'kbSaveAsTemplateBtn';
+    saveBtn.className = 'btn-sm btn-outline-dark';
+    saveBtn.textContent = 'Сохранить как шаблон';
+    saveBtn.style.marginLeft = '8px';
+    kbEditorSubmitBtn.parentNode.insertBefore(saveBtn, kbEditorSubmitBtn.nextSibling);
+    saveBtn.addEventListener('click', async () => {
+      const name = prompt('Название шаблона:', article.title);
+      if (!name || !name.trim()) return;
+      const content = state.kbQuill ? state.kbQuill.root.innerHTML : '';
+      try {
+        await api('/api/kb/templates', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ name: name.trim(), description: '', content })
+        });
+        showToast('Шаблон сохранён', 'ok');
+      } catch (err) { showToast(err.message, 'danger'); }
+    });
+  }
+
   show(kbEditorPopup);
 
   // Init Quill after popup is visible
@@ -4003,6 +3966,138 @@ function closeKbEditor() {
 }
 kbEditorCancelBtn.addEventListener('click', closeKbEditor);
 kbEditorPopup.addEventListener('click', (e) => { if (e.target === kbEditorPopup && confirm('Закрыть редактор?')) closeKbEditor(); });
+
+// KB History viewer
+async function showKbHistory(articleId) {
+  try {
+    const versions = await api(`/api/kb/articles/${articleId}/history`);
+    if (!versions.length) { showToast('Нет предыдущих версий', 'warn'); return; }
+
+    let html = '<div class="kb-history-panel"><h3>История версий</h3><div class="kb-history-list">';
+    for (const v of versions) {
+      html += `<div class="kb-history-item" data-vid="${esc(v.id)}" data-aid="${esc(articleId)}">
+        <div class="kb-history-date">${new Date(v.created_at).toLocaleString('ru-RU')}</div>
+        <div class="kb-history-author">${esc(v.edited_by)}</div>
+        <div class="kb-history-actions">
+          <button class="btn-sm btn-outline-dark kb-history-view" data-vid="${esc(v.id)}" data-aid="${esc(articleId)}">Просмотр</button>
+          <button class="btn-sm btn-primary kb-history-restore" data-vid="${esc(v.id)}" data-aid="${esc(articleId)}">Восстановить</button>
+        </div>
+      </div>`;
+    }
+    html += '</div><button class="btn-sm btn-outline-dark kb-history-close" style="margin-top:12px">Закрыть</button></div>';
+
+    const overlay = document.createElement('div');
+    overlay.className = 'kb-history-overlay';
+    overlay.innerHTML = html;
+    document.body.appendChild(overlay);
+
+    overlay.querySelector('.kb-history-close').addEventListener('click', () => overlay.remove());
+    overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+
+    overlay.querySelectorAll('.kb-history-view').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        const version = await api(`/api/kb/articles/${btn.dataset.aid}/history/${btn.dataset.vid}`);
+        const modal = document.createElement('div');
+        modal.className = 'kb-history-overlay';
+        modal.innerHTML = `<div class="kb-history-panel" style="max-width:800px;max-height:80vh;overflow:auto">
+          <h3>${esc(version.title)}</h3>
+          <p style="font-size:12px;color:var(--text-sec)">${esc(version.edited_by)} · ${new Date(version.created_at).toLocaleString('ru-RU')}</p>
+          <div class="kb-article-content">${version.content}</div>
+          <button class="btn-sm btn-outline-dark kb-history-close" style="margin-top:12px">Закрыть</button>
+        </div>`;
+        document.body.appendChild(modal);
+        modal.querySelector('.kb-history-close').addEventListener('click', () => modal.remove());
+        modal.addEventListener('click', (e) => { if (e.target === modal) modal.remove(); });
+      });
+    });
+
+    overlay.querySelectorAll('.kb-history-restore').forEach(btn => {
+      btn.addEventListener('click', async () => {
+        if (!confirm('Восстановить эту версию? Текущее содержимое будет сохранено в историю.')) return;
+        try {
+          await api(`/api/kb/articles/${btn.dataset.aid}/restore/${btn.dataset.vid}`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({})
+          });
+          showToast('Версия восстановлена', 'ok');
+          overlay.remove();
+          loadKbView();
+        } catch (err) { showToast(err.message, 'danger'); }
+      });
+    });
+  } catch (err) { showToast(err.message, 'danger'); }
+}
+
+// @mention autocomplete for TZ comments
+let _mentionUsers = null;
+
+async function loadMentionUsers() {
+  if (_mentionUsers) return _mentionUsers;
+  try {
+    _mentionUsers = await api('/api/users/names');
+    return _mentionUsers;
+  } catch { return []; }
+}
+
+function setupMentionAutocomplete(input) {
+  if (!input) return;
+  let dropdown = null;
+
+  input.addEventListener('input', async () => {
+    const val = input.value;
+    const cursorPos = input.selectionStart;
+    const textBefore = val.slice(0, cursorPos);
+    const mentionMatch = textBefore.match(/@([А-Яа-яЁёA-Za-z]*)$/);
+
+    if (!mentionMatch) {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      return;
+    }
+
+    const query = mentionMatch[1].toLowerCase();
+    const users = await loadMentionUsers();
+    const filtered = users.filter(u => u.fullName.toLowerCase().includes(query)).slice(0, 5);
+
+    if (!filtered.length) {
+      if (dropdown) { dropdown.remove(); dropdown = null; }
+      return;
+    }
+
+    if (!dropdown) {
+      dropdown = document.createElement('div');
+      dropdown.className = 'mention-dropdown';
+      input.parentNode.style.position = 'relative';
+      input.parentNode.appendChild(dropdown);
+    }
+
+    dropdown.innerHTML = filtered.map(u =>
+      `<div class="mention-option" data-name="${esc(u.fullName)}">${esc(u.fullName)}</div>`
+    ).join('');
+
+    dropdown.querySelectorAll('.mention-option').forEach(opt => {
+      opt.addEventListener('mousedown', (e) => {
+        e.preventDefault();
+        const name = opt.dataset.name;
+        const before = val.slice(0, cursorPos - mentionMatch[0].length);
+        const after = val.slice(cursorPos);
+        input.value = before + '@' + name + ' ' + after;
+        input.focus();
+        const newPos = before.length + name.length + 2;
+        input.setSelectionRange(newPos, newPos);
+        dropdown.remove();
+        dropdown = null;
+      });
+    });
+  });
+
+  input.addEventListener('blur', () => {
+    setTimeout(() => { if (dropdown) { dropdown.remove(); dropdown = null; } }, 200);
+  });
+}
+
+// Initialize mention autocomplete on TZ comment input
+setupMentionAutocomplete(tzCommentInput);
 
 // KB document upload (.docx / .xlsx → HTML)
 kbDocUploadBtn.addEventListener('click', () => kbDocFileInput.click());
@@ -4473,16 +4568,13 @@ async function performGlobalSearch(q) {
 let _metricsChartInstances = [];
 
 async function loadMetrics() {
-  if (state.adminRole !== 'superadmin') return;
-  const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
+  if (!metricsContent) return;
+  metricsContent.innerHTML = '<p class="admin-empty">Загрузка...</p>';
   try {
-    const data = await api('/api/admin/tz-metrics', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, ...boardPayload })
-    });
+    const data = await api('/api/metrics');
     renderMetrics(data);
   } catch (err) {
+    metricsContent.innerHTML = '';
     msg(metricsMessage, err.message, 'error');
   }
 }
@@ -4493,43 +4585,77 @@ function renderMetrics(data) {
   _metricsChartInstances.forEach((c) => c.destroy());
   _metricsChartInstances = [];
 
-  const donePercent = data.total ? Math.round((data.totalDone / data.total) * 100) : 0;
-  const inWork = data.total - data.totalDone;
+  const donePercent = data.totalTz ? Math.round((data.totalDone / data.totalTz) * 100) : 0;
 
-  metricsContent.innerHTML = `
-    <div class="metrics-summary">
-      <div class="metrics-card">
-        <div class="metrics-num">${data.total}</div>
-        <div class="metrics-label">Всего задач</div>
-      </div>
-      <div class="metrics-card metrics-card-accent">
-        <div class="metrics-num">${inWork}</div>
-        <div class="metrics-label">В работе</div>
-      </div>
-      <div class="metrics-card metrics-card-success">
-        <div class="metrics-num">${data.totalDone}</div>
-        <div class="metrics-label">Завершено</div>
-      </div>
-      <div class="metrics-card">
-        <div class="metrics-num">${data.avgCycleTime}<small>д</small></div>
-        <div class="metrics-label">Ср. цикл выполнения</div>
-      </div>
+  let html = '';
+
+  // Summary cards
+  html += `<div class="metrics-summary">
+    <div class="metrics-card">
+      <div class="metrics-num">${data.totalTz}</div>
+      <div class="metrics-label">Всего ТЗ</div>
     </div>
-    <div class="metrics-progress-wrap">
-      <div class="metrics-progress-header">
-        <span>Прогресс завершения</span>
-        <span class="metrics-progress-pct">${donePercent}%</span>
-      </div>
-      <div class="metrics-progress-bar">
-        <div class="metrics-progress-fill" style="width:${donePercent}%"></div>
-      </div>
+    <div class="metrics-card metrics-card-accent">
+      <div class="metrics-num">${data.activeTz}</div>
+      <div class="metrics-label">В работе</div>
     </div>
-    <div class="metrics-charts">
-      <div class="metrics-chart-wrap metrics-chart-wide"><h4>Динамика создания задач</h4><canvas id="chartCreatedPerWeek"></canvas></div>
-      <div class="metrics-chart-wrap"><h4>Распределение по статусам</h4><canvas id="chartStatus"></canvas></div>
-      <div class="metrics-chart-wrap"><h4>Распределение по приоритетам</h4><canvas id="chartPriority"></canvas></div>
-      <div class="metrics-chart-wrap"><h4>Распределение по типам</h4><canvas id="chartType"></canvas></div>
-    </div>`;
+    <div class="metrics-card metrics-card-success">
+      <div class="metrics-num">${data.totalDone}</div>
+      <div class="metrics-label">Завершено</div>
+    </div>
+    <div class="metrics-card ${data.overdue > 0 ? 'metrics-card-danger' : ''}">
+      <div class="metrics-num">${data.overdue}</div>
+      <div class="metrics-label">Просрочено</div>
+    </div>
+    <div class="metrics-card ${data.deadlineSoon > 0 ? 'metrics-card-warn' : ''}">
+      <div class="metrics-num">${data.deadlineSoon}</div>
+      <div class="metrics-label">Скоро дедлайн</div>
+    </div>
+    <div class="metrics-card">
+      <div class="metrics-num">${data.avgCycleTime}<small>д</small></div>
+      <div class="metrics-label">Ср. цикл выполнения</div>
+    </div>
+    <div class="metrics-card">
+      <div class="metrics-num">${data.totalUsers}</div>
+      <div class="metrics-label">Пользователей</div>
+    </div>
+  </div>`;
+
+  // Progress bar
+  html += `<div class="metrics-progress-wrap">
+    <div class="metrics-progress-header">
+      <span>Прогресс завершения</span>
+      <span class="metrics-progress-pct">${donePercent}%</span>
+    </div>
+    <div class="metrics-progress-bar">
+      <div class="metrics-progress-fill" style="width:${donePercent}%"></div>
+    </div>
+  </div>`;
+
+  // Charts
+  html += `<div class="metrics-charts">
+    <div class="metrics-chart-wrap metrics-chart-wide"><h4>Динамика создания задач</h4><canvas id="chartCreatedPerWeek"></canvas></div>
+    <div class="metrics-chart-wrap"><h4>Распределение по статусам</h4><canvas id="chartStatus"></canvas></div>
+    <div class="metrics-chart-wrap"><h4>Распределение по приоритетам</h4><canvas id="chartPriority"></canvas></div>
+    <div class="metrics-chart-wrap"><h4>Распределение по типам</h4><canvas id="chartType"></canvas></div>
+  </div>`;
+
+  // Top assignees (horizontal bars)
+  if (data.topAssignees && data.topAssignees.length) {
+    const maxA = Math.max(...data.topAssignees.map(a => a[1]), 1);
+    html += '<div class="metrics-assignees"><h4>Нагрузка по исполнителям</h4><div class="metrics-bars">';
+    for (const [name, count] of data.topAssignees) {
+      const pct = Math.round(count / maxA * 100);
+      html += `<div class="metrics-bar-row">
+        <span class="metrics-bar-label">${esc(name)}</span>
+        <div class="metrics-bar-track"><div class="metrics-bar-fill" style="width:${pct}%"></div></div>
+        <span class="metrics-bar-value">${count}</span>
+      </div>`;
+    }
+    html += '</div></div>';
+  }
+
+  metricsContent.innerHTML = html;
 
   if (typeof Chart === 'undefined') return;
 
@@ -4781,16 +4907,215 @@ function showOnboarding() {
   overlay.addEventListener('click', (e) => { if (e.target === overlay) dismiss(); });
 }
 
+/* ── My Tasks ── */
+
+const TASK_STATUS_LABELS = { todo: 'К выполнению', in_progress: 'В работе', done: 'Выполнено', cancelled: 'Отменено' };
+const TASK_PRIO_LABELS = { low: 'Низкий', medium: 'Средний', high: 'Высокий' };
+const TASK_TYPE_LABELS = { task: 'Задача', bug: 'Баг', proposal: 'Предложение' };
+
+async function loadTasks() {
+  if (!tasksContent) return;
+  tasksContent.innerHTML = '<p class="admin-empty">Загрузка...</p>';
+  try {
+    state.tasks = await api('/api/tasks');
+    renderTasks();
+    updateTasksBadge();
+  } catch (err) {
+    tasksContent.innerHTML = '<p class="message error">' + esc(err.message) + '</p>';
+  }
+}
+
+function renderTasks() {
+  const f = state.taskFilter;
+  let tasks = state.tasks;
+  if (f.status) tasks = tasks.filter(t => t.status === f.status);
+  if (f.type) tasks = tasks.filter(t => t.type === f.type);
+  if (f.search) {
+    const q = f.search.toLowerCase();
+    tasks = tasks.filter(t => t.title.toLowerCase().includes(q) || (t.description || '').toLowerCase().includes(q));
+  }
+
+  // Toolbar
+  tasksToolbar.innerHTML = `
+    <div class="tasks-filters">
+      <select id="taskFilterStatus">
+        <option value="">Все статусы</option>
+        ${Object.entries(TASK_STATUS_LABELS).map(([k, v]) => `<option value="${k}"${f.status === k ? ' selected' : ''}>${v}</option>`).join('')}
+      </select>
+      <select id="taskFilterType">
+        <option value="">Все типы</option>
+        ${Object.entries(TASK_TYPE_LABELS).map(([k, v]) => `<option value="${k}"${f.type === k ? ' selected' : ''}>${v}</option>`).join('')}
+      </select>
+      <input id="taskSearch" placeholder="Поиск..." value="${esc(f.search || '')}" style="min-width:150px" />
+    </div>
+    <button class="btn-primary btn-sm" id="taskCreateBtn">+ Новая задача</button>
+  `;
+
+  $('taskFilterStatus').addEventListener('change', (e) => { state.taskFilter.status = e.target.value; renderTasks(); });
+  $('taskFilterType').addEventListener('change', (e) => { state.taskFilter.type = e.target.value; renderTasks(); });
+  let _taskSearchTimer;
+  $('taskSearch').addEventListener('input', (e) => {
+    clearTimeout(_taskSearchTimer);
+    _taskSearchTimer = setTimeout(() => { state.taskFilter.search = e.target.value; renderTasks(); }, 300);
+  });
+  $('taskCreateBtn').addEventListener('click', () => openTaskForm(null));
+
+  // Kanban board
+  const statuses = ['todo', 'in_progress', 'done', 'cancelled'];
+  let boardHtml = '<div class="task-board">';
+  for (const s of statuses) {
+    const colTasks = tasks.filter(t => t.status === s);
+    boardHtml += `<div class="task-column" data-status="${s}">
+      <div class="task-column-header">${TASK_STATUS_LABELS[s]} <span class="task-column-count">${colTasks.length}</span></div>`;
+    for (const t of colTasks) {
+      const isOverdue = t.due_date && new Date(t.due_date) < new Date() && s !== 'done' && s !== 'cancelled';
+      const dueLbl = t.due_date ? new Date(t.due_date).toLocaleDateString('ru-RU') : '';
+      const typeCls = 'task-type-' + t.type;
+      boardHtml += `<div class="task-card task-prio-${t.priority}" data-task-id="${esc(t.id)}">
+        <div class="task-card-prio"></div>
+        <div class="task-card-title">${esc(t.title)}</div>
+        <div class="task-card-meta">
+          <span class="task-type-badge ${typeCls}">${TASK_TYPE_LABELS[t.type] || t.type}</span>
+          ${t.type === 'proposal' && t.proposal_status ? `<span class="task-proposal-badge task-proposal-${t.proposal_status}">${t.proposal_status === 'pending' ? 'На рассмотрении' : t.proposal_status === 'approved' ? 'Одобрено' : 'Отклонено'}</span>` : ''}
+          ${dueLbl ? `<span class="${isOverdue ? 'task-due-overdue' : ''}">${dueLbl}</span>` : ''}
+          <span>${esc(t.assignee_name || '')}</span>
+        </div>
+      </div>`;
+    }
+    boardHtml += '</div>';
+  }
+  boardHtml += '</div>';
+  tasksContent.innerHTML = boardHtml;
+
+  // Card click -> open detail
+  tasksContent.querySelectorAll('.task-card').forEach(card => {
+    card.addEventListener('click', () => {
+      const task = state.tasks.find(t => t.id === card.dataset.taskId);
+      if (task) openTaskForm(task);
+    });
+  });
+}
+
+async function openTaskForm(task) {
+  const isEdit = !!task;
+  const users = await api('/api/users/names');
+
+  const overlay = document.createElement('div');
+  overlay.className = 'task-popup-overlay';
+  overlay.innerHTML = `<div class="task-popup">
+    <h3>${isEdit ? 'Редактировать задачу' : 'Новая задача'}</h3>
+    <label>Название<input id="taskTitle" value="${isEdit ? esc(task.title) : ''}" maxlength="200" /></label>
+    <label>Описание<textarea id="taskDesc" rows="3">${isEdit ? esc(task.description || '') : ''}</textarea></label>
+    <label>Тип
+      <select id="taskType">
+        ${Object.entries(TASK_TYPE_LABELS).map(([k, v]) => `<option value="${k}"${isEdit && task.type === k ? ' selected' : ''}>${v}</option>`).join('')}
+      </select>
+    </label>
+    <label>Приоритет
+      <select id="taskPrio">
+        ${Object.entries(TASK_PRIO_LABELS).map(([k, v]) => `<option value="${k}"${isEdit && task.priority === k ? ' selected' : ''}>${v}</option>`).join('')}
+      </select>
+    </label>
+    <label>Исполнитель
+      <select id="taskAssignee">
+        ${users.map(u => `<option value="${esc(u.id)}"${isEdit && task.assignee_id === u.id ? ' selected' : ''}${!isEdit && u.id === state.userId ? ' selected' : ''}>${esc(u.fullName)}</option>`).join('')}
+      </select>
+    </label>
+    <label>Срок<input id="taskDue" type="date" value="${isEdit ? (task.due_date || '') : ''}" /></label>
+    <label>Метки<input id="taskTags" placeholder="Через запятую" value="${isEdit ? (task.tags || []).join(', ') : ''}" /></label>
+    ${isEdit ? `<label>Статус
+      <select id="taskStatus">
+        ${Object.entries(TASK_STATUS_LABELS).map(([k, v]) => `<option value="${k}"${task.status === k ? ' selected' : ''}>${v}</option>`).join('')}
+      </select>
+    </label>` : ''}
+    ${isEdit && task.type === 'proposal' && state.adminRole === 'superadmin' && task.proposal_status === 'pending' ? `
+      <div style="margin-top:12px;padding:12px;background:var(--bg-soft);border-radius:8px">
+        <strong>Рассмотрение предложения</strong>
+        <div style="display:flex;gap:8px;margin-top:8px">
+          <button class="btn-primary btn-sm" id="taskApproveBtn">Одобрить</button>
+          <button class="btn-cancel-sm" id="taskRejectBtn">Отклонить</button>
+        </div>
+      </div>
+    ` : ''}
+    <div class="task-popup-actions">
+      ${isEdit ? `<button class="btn-cancel-sm" id="taskDeleteBtn" style="margin-right:auto">Удалить</button>` : ''}
+      <button class="btn-outline-dark btn-sm" id="taskCancelBtn">Отмена</button>
+      <button class="btn-primary btn-sm" id="taskSaveBtn">${isEdit ? 'Сохранить' : 'Создать'}</button>
+    </div>
+    <p id="taskFormMsg" class="message" style="margin-top:8px"></p>
+  </div>`;
+
+  document.body.appendChild(overlay);
+  overlay.addEventListener('click', (e) => { if (e.target === overlay) overlay.remove(); });
+  overlay.querySelector('#taskCancelBtn').addEventListener('click', () => overlay.remove());
+
+  overlay.querySelector('#taskSaveBtn').addEventListener('click', async () => {
+    const title = overlay.querySelector('#taskTitle').value.trim();
+    if (!title || title.length < 3) { msg(overlay.querySelector('#taskFormMsg'), 'Название минимум 3 символа', 'error'); return; }
+    const body = {
+      title,
+      description: overlay.querySelector('#taskDesc').value.trim(),
+      type: overlay.querySelector('#taskType').value,
+      priority: overlay.querySelector('#taskPrio').value,
+      assignee_id: overlay.querySelector('#taskAssignee').value,
+      due_date: overlay.querySelector('#taskDue').value || '',
+      tags: overlay.querySelector('#taskTags').value.split(',').map(t => t.trim()).filter(Boolean)
+    };
+    if (isEdit) body.status = overlay.querySelector('#taskStatus')?.value || task.status;
+    try {
+      if (isEdit) {
+        await api(`/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        showToast('Задача обновлена', 'ok');
+      } else {
+        await api('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        showToast('Задача создана', 'ok');
+      }
+      overlay.remove();
+      loadTasks();
+    } catch (err) { msg(overlay.querySelector('#taskFormMsg'), err.message, 'error'); }
+  });
+
+  overlay.querySelector('#taskDeleteBtn')?.addEventListener('click', async () => {
+    if (!confirm('Удалить задачу?')) return;
+    try {
+      await api(`/api/tasks/${task.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      showToast('Задача удалена', 'ok');
+      overlay.remove();
+      loadTasks();
+    } catch (err) { showToast(err.message, 'danger'); }
+  });
+
+  // Proposal review buttons
+  overlay.querySelector('#taskApproveBtn')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/tasks/${task.id}/review`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'approved' }) });
+      showToast('Предложение одобрено', 'ok');
+      overlay.remove();
+      loadTasks();
+    } catch (err) { showToast(err.message, 'danger'); }
+  });
+
+  overlay.querySelector('#taskRejectBtn')?.addEventListener('click', async () => {
+    try {
+      await api(`/api/tasks/${task.id}/review`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'rejected' }) });
+      showToast('Предложение отклонено', 'ok');
+      overlay.remove();
+      loadTasks();
+    } catch (err) { showToast(err.message, 'danger'); }
+  });
+}
+
+function updateTasksBadge() {
+  const badge = $('tasksBadge');
+  if (!badge) return;
+  const active = (state.tasks || []).filter(t => t.status === 'todo' || t.status === 'in_progress').length;
+  if (active > 0) { badge.textContent = active; badge.style.display = ''; }
+  else { badge.style.display = 'none'; }
+}
+
 /* ── Init ── */
 
-// Check if this is the standalone IT status page
-const itStatusMatch = location.pathname.match(/^\/it-status\/([0-9a-f-]{36})$/);
-if (itStatusMatch) {
-  renderItStatusPage(itStatusMatch[1]);
-} else {
-  resetItWizard();
-
-  (async () => {
+(async () => {
     const loggedIn = await tryAutoLogin();
     if (loggedIn) {
       showMain(); await loadApp(); showTzNotifications(); startBookingReminders();
@@ -4799,4 +5124,3 @@ if (itStatusMatch) {
     }
     else { showAuth(); }
   })();
-}

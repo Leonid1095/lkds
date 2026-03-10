@@ -1,0 +1,29 @@
+{
+  "roles": [
+    {
+      "id": "superadmin",
+      "name": "Суперадмин",
+      "description": "Полный доступ ко всем разделам",
+      "system": true,
+      "permissions": {
+        "admin_sections": "*",
+        "boards": "*",
+        "kb_categories": "*",
+        "features": "*"
+      }
+    },
+    {
+      "id": "employee",
+      "name": "Сотрудник",
+      "description": "Базовый доступ",
+      "system": true,
+      "permissions": {
+        "admin_sections": [],
+        "boards": [],
+        "kb_categories": [],
+        "features": []
+      }
+    }
+  ],
+  "groups": []
+}
