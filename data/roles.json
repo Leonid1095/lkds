@@ -10,5 +10,17 @@
     "name": "Сотрудник",
     "description": "Базовый доступ",
     "system": true
+  },
+  {
+    "id": "viewer",
+    "name": "Наблюдатель",
+    "description": "Только просмотр",
+    "system": true
+  },
+  {
+    "id": "администратор",
+    "name": "Администратор",
+    "description": "",
+    "system": false
   }
 ]

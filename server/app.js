@@ -575,6 +575,21 @@ async function migrateRoles() {
     await writeJson(FILES.permissions, perms);
     console.log('[migrate] added viewer role to permissions');
   }
+
+  // Sync roles.json with permissions.json — keep roles.json as a simple list mirror
+  const rolesFile = await readJson(FILES.roles, []);
+  const permsRoleIds = new Set(perms.roles.map(r => r.id));
+  let rolesChanged = false;
+  for (const pr of perms.roles) {
+    if (!rolesFile.some(r => r.id === pr.id)) {
+      rolesFile.push({ id: pr.id, name: pr.name, description: pr.description || '', system: !!pr.system });
+      rolesChanged = true;
+    }
+  }
+  if (rolesChanged) {
+    await writeJson(FILES.roles, rolesFile);
+    console.log('[migrate] synced roles.json with permissions.json');
+  }
 }
 
 /** Ensure bidirectional linked_tz_ids integrity */
@@ -686,7 +701,11 @@ function getUserRole(pin, user) {
   return null;
 }
 
-function isAdmin(pin, user) { return !!getUserRole(pin, user); }
+function isAdmin(pin, user) {
+  const role = getUserRole(pin, user);
+  if (!role || role === 'viewer') return false;
+  return true;
+}
 function isSuperAdmin(pin, user) { return getUserRole(pin, user) === 'superadmin'; }
 
 /* ── Unified permission resolution ── */
@@ -1324,7 +1343,7 @@ app.post('/api/admin/users', async (req, res) => {
     return {
       id: u.id, fullName: u.fullName, contact: u.contact,
       position: u.position || '', avatar: !!u.avatar,
-      isAdmin: !!role, role: role || 'employee', createdAt: u.createdAt
+      isAdmin: isAdmin('', u), role: role || 'employee', createdAt: u.createdAt
     };
   }).sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   return res.json(paginate(list, page, pageSize));
@@ -1372,23 +1391,6 @@ app.post('/api/admin/update-user', async (req, res) => {
   });
 });
 
-app.post('/api/admin/toggle-admin', async (req, res) => {
-  const pin = getPin(req);
-  const targetId = String(req.body.targetId || '').trim();
-  if (!(await requireAdminSection(pin, 'users'))) return res.status(403).json({ message: 'Нет доступа.' });
-  if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
-
-  const users = await readJson(FILES.users, []);
-  const target = users.find((u) => u.id === targetId);
-  if (!target) return res.status(404).json({ message: 'Пользователь не найден.' });
-
-  target.isAdmin = !target.isAdmin;
-  await writeJson(FILES.users, users);
-  invalidatePinCacheByUserId(targetId);
-  auditLog('toggle-admin', 'admin', { targetId, targetName: target.fullName, isAdmin: target.isAdmin });
-  return res.json({ id: targetId, isAdmin: !!target.isAdmin });
-});
-
 app.post('/api/admin/set-role', async (req, res) => {
   const pin = getPin(req);
   const targetId = String(req.body.targetId || '').trim();
@@ -1396,20 +1398,35 @@ app.post('/api/admin/set-role', async (req, res) => {
 
   if (!(await requireAdminSection(pin, 'users'))) return res.status(403).json({ message: 'Нет доступа.' });
   if (!targetId) return res.status(400).json({ message: 'Укажите id пользователя.' });
-  const roles = await readJson(FILES.roles, DEFAULT_ROLES);
-  if (!roles.some(r => r.id === role))
-    return res.status(400).json({ message: `Неизвестная роль: ${role}.` });
+
+  // Validate role against permissions.json (single source of truth)
+  const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+  const roleEntry = permsData.roles.find(r => r.id === role);
+  if (!roleEntry) {
+    // Fallback check in roles.json for backward compat
+    const rolesFile = await readJson(FILES.roles, DEFAULT_ROLES);
+    if (!rolesFile.some(r => r.id === role))
+      return res.status(400).json({ message: `Неизвестная роль: ${role}.` });
+  }
 
   const users = await readJson(FILES.users, []);
   const target = users.find((u) => u.id === targetId);
   if (!target) return res.status(404).json({ message: 'Пользователь не найден.' });
 
-  if (role === 'employee') {
+  if (role === 'employee' || role === 'viewer') {
     delete target.role;
+    if (role === 'viewer') target.role = 'viewer';
     target.isAdmin = false;
-  } else {
-    target.role = role;
+  } else if (role === 'superadmin') {
+    target.role = 'superadmin';
     target.isAdmin = true;
+  } else {
+    // Custom roles — determine isAdmin from role permissions
+    target.role = role;
+    const hasAdminSections = roleEntry && roleEntry.permissions &&
+      (roleEntry.permissions.admin_sections === '*' ||
+       (Array.isArray(roleEntry.permissions.admin_sections) && roleEntry.permissions.admin_sections.length > 0));
+    target.isAdmin = !!hasAdminSections;
   }
 
   await writeJson(FILES.users, users);
@@ -1421,7 +1438,14 @@ app.post('/api/admin/set-role', async (req, res) => {
 /* ── Roles management ── */
 
 app.get('/api/roles', async (_req, res) => {
-  const roles = await readJson(FILES.roles, DEFAULT_ROLES);
+  // Read from permissions.json as the single source of truth for roles
+  const permsData = await readJson(FILES.permissions, { roles: [], groups: [] });
+  const roles = permsData.roles.map(r => ({ id: r.id, name: r.name, description: r.description, system: !!r.system }));
+  // Fallback to roles.json if permissions has no roles
+  if (!roles.length) {
+    const fallback = await readJson(FILES.roles, DEFAULT_ROLES);
+    return res.json(fallback);
+  }
   res.json(roles);
 });
 
@@ -1932,6 +1956,14 @@ app.post('/api/admin/access/roles', async (req, res) => {
     };
     permsData.roles.push(newRole);
     await writeJson(FILES.permissions, permsData);
+
+    // Sync to roles.json
+    const rolesFile = await readJson(FILES.roles, DEFAULT_ROLES);
+    if (!rolesFile.some(r => r.id === id)) {
+      rolesFile.push({ id, name: name.trim(), description: (description || '').trim(), system: false });
+      await writeJson(FILES.roles, rolesFile);
+    }
+
     return res.status(201).json(newRole);
   });
 });
@@ -1953,6 +1985,16 @@ app.put('/api/admin/access/roles/:id', async (req, res) => {
     if (permissions !== undefined) role.permissions = permissions;
 
     await writeJson(FILES.permissions, permsData);
+
+    // Sync to roles.json
+    const rolesFile = await readJson(FILES.roles, DEFAULT_ROLES);
+    const rf = rolesFile.find(r => r.id === roleId);
+    if (rf) {
+      if (name !== undefined) rf.name = String(name).trim();
+      if (description !== undefined) rf.description = String(description).trim();
+      await writeJson(FILES.roles, rolesFile);
+    }
+
     return res.json(role);
   });
 });
@@ -1971,6 +2013,15 @@ app.delete('/api/admin/access/roles/:id', async (req, res) => {
 
     permsData.roles = permsData.roles.filter(r => r.id !== roleId);
     await writeJson(FILES.permissions, permsData);
+
+    // Sync to roles.json
+    const rolesFile = await readJson(FILES.roles, DEFAULT_ROLES);
+    const ridx = rolesFile.findIndex(r => r.id === roleId);
+    if (ridx !== -1) {
+      rolesFile.splice(ridx, 1);
+      await writeJson(FILES.roles, rolesFile);
+    }
+
     return res.json({ message: 'Роль удалена.' });
   });
 });
@@ -2059,9 +2110,20 @@ app.put('/api/admin/access/user-role', async (req, res) => {
     if (!user) return res.status(404).json({ message: 'Пользователь не найден.' });
 
     user.role = roleId;
-    // Clear legacy isAdmin flag when explicitly setting role
-    if (roleId === 'superadmin') user.isAdmin = true;
-    else if (roleId === 'employee') delete user.isAdmin;
+    // Determine isAdmin from role permissions
+    if (roleId === 'superadmin') {
+      user.isAdmin = true;
+    } else if (roleId === 'employee' || roleId === 'viewer') {
+      user.isAdmin = false;
+      if (roleId === 'employee') delete user.role;
+    } else {
+      // Custom roles — isAdmin based on whether role has admin_sections
+      const roleEntry = permsData.roles.find(r => r.id === roleId);
+      const hasAdminSections = roleEntry && roleEntry.permissions &&
+        (roleEntry.permissions.admin_sections === '*' ||
+         (Array.isArray(roleEntry.permissions.admin_sections) && roleEntry.permissions.admin_sections.length > 0));
+      user.isAdmin = !!hasAdminSections;
+    }
 
     await writeJson(FILES.users, users);
     // Invalidate pin cache for this user

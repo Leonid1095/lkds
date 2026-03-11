@@ -1,0 +1,22 @@
+[
+  {
+    "id": "94cc54df-72d5-4421-bac1-89f5200b91b5",
+    "user_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "type": "system",
+    "title": "Предложение одобрено",
+    "body": "Предложение по улучшению",
+    "link": "#tasks/2876f18f-ca91-4495-b019-682c2a4434e0",
+    "read": true,
+    "created_at": "2026-03-10T18:25:38.160Z"
+  },
+  {
+    "id": "a43d3136-f9e6-416f-8c15-417ce75c941e",
+    "user_id": "151bef44-8c4f-44e8-9859-4c7bbdd744df",
+    "type": "system",
+    "title": "Предложение одобрено",
+    "body": "E2E предложение",
+    "link": "#tasks/bfbecfb8-b5f2-4826-83cd-f3c8e7ff81a3",
+    "read": true,
+    "created_at": "2026-03-10T18:29:24.065Z"
+  }
+]

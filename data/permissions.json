@@ -23,7 +23,92 @@
         "kb_categories": [],
         "features": []
       }
+    },
+    {
+      "id": "viewer",
+      "name": "Наблюдатель",
+      "description": "Только просмотр",
+      "system": true,
+      "permissions": {
+        "admin_sections": [],
+        "boards": [],
+        "kb_categories": [],
+        "features": []
+      }
+    },
+    {
+      "id": "администратор",
+      "name": "Администратор",
+      "description": "",
+      "system": false,
+      "permissions": {
+        "admin_sections": [
+          "bookings",
+          "tickets",
+          "suggestions",
+          "users",
+          "pin-requests",
+          "crm-config"
+        ],
+        "boards": [
+          "0577e1cf-67e3-4a04-b57b-7f2863720572",
+          "6decb557-e29f-4f5c-b2a4-07622b28b89d",
+          "25e5c2a6-1db4-42de-b463-5a8aa4f21453"
+        ],
+        "kb_categories": [
+          "1e5202ba-220a-4085-bfb0-3c743950e85b",
+          "5ea8d642-7921-44b8-81ed-91e76defe978",
+          "e1b93894-35f3-498b-8794-868884d53a47",
+          "c0fb7ff5-45f8-4236-8fb0-8dbf1578bc87",
+          "02616889-ee26-4d7c-a4e7-6875a6a4298a",
+          "3b8e5bc4-60aa-491f-b362-dc883ce0cc9b",
+          "ce044ed8-4171-4455-8add-f3e84d5b07c8"
+        ],
+        "features": [
+          "tz_create_all",
+          "tz_edit_all",
+          "tz_bulk",
+          "tz_export",
+          "tz_import",
+          "kb_manage_categories",
+          "kb_create_articles"
+        ]
+      }
     }
   ],
-  "groups": []
+  "groups": [
+    {
+      "id": "f6bcd004-d3ed-4294-91e8-3867efeee468",
+      "name": "Администраторы",
+      "description": "",
+      "members": [
+        "9f04ba83-2f79-4f6c-a315-1e44f5e47cad",
+        "5afb804d-3b39-4dc1-b012-441881633f38"
+      ],
+      "permissions": {
+        "admin_sections": [
+          "bookings",
+          "tickets",
+          "suggestions",
+          "users",
+          "pin-requests",
+          "crm-config"
+        ],
+        "boards": [
+          "0577e1cf-67e3-4a04-b57b-7f2863720572",
+          "6decb557-e29f-4f5c-b2a4-07622b28b89d"
+        ],
+        "kb_categories": [],
+        "features": [
+          "tz_create_all",
+          "tz_edit_all",
+          "tz_bulk",
+          "tz_export",
+          "tz_import",
+          "kb_manage_categories",
+          "kb_create_articles"
+        ]
+      }
+    }
+  ]
 }

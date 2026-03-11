@@ -133,8 +133,7 @@ if (tzCommentsList) tzCommentsList.addEventListener('click', async (e) => {
   try {
     await api(`/api/tz/${tzId}/comments/${commentId}`, {
       method: 'DELETE',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({})
     });
     await renderTzComments(tzId);
   } catch (err) { showToast(err.message, 'danger'); }
@@ -151,8 +150,7 @@ if (tzCommentSendBtn) tzCommentSendBtn.addEventListener('click', async () => {
   try {
     await api(`/api/tz/${tzId}/comments`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, text })
+      body: JSON.stringify({ text })
     });
     tzCommentInput.value = '';
     await renderTzComments(tzId);
@@ -273,10 +271,23 @@ async function api(url, opts = {}) {
   if (state.pin) {
     opts.headers = { ...opts.headers, 'X-Auth-Pin': state.pin };
   }
+  // Auto-set Content-Type for string bodies (JSON)
+  if (opts.body && typeof opts.body === 'string') {
+    opts.headers = { 'Content-Type': 'application/json', ...opts.headers };
+  }
   const res = await fetch(url, opts);
   const data = await res.json().catch(() => ({}));
   if (!res.ok) throw new Error(data.message || 'Ошибка запроса');
   return data;
+}
+
+/** Shorthand: POST JSON via api() */
+function postJson(url, body = {}) {
+  return api(url, { method: 'POST', body: JSON.stringify(body) });
+}
+/** Shorthand: PUT JSON via api() */
+function putJson(url, body = {}) {
+  return api(url, { method: 'PUT', body: JSON.stringify(body) });
 }
 
 function show(el) { el.classList.remove('hidden'); }
@@ -412,7 +423,6 @@ async function tryAutoLogin() {
   try {
     const data = await api('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: saved })
     });
     state.pin = saved;
@@ -458,10 +468,11 @@ function showMain() {
   tabKb.style.display = state.pin ? '' : 'none';
   const tabTasks = $('tabTasks');
   if (tabTasks) tabTasks.style.display = state.pin ? '' : 'none';
-  if (metricsContent) {
-    const tabMetrics = $('tabMetrics');
-    if (tabMetrics) tabMetrics.style.display = '';
-  }
+  // Метрики скрыты до востребования
+  // if (metricsContent) {
+  //   const tabMetrics = $('tabMetrics');
+  //   if (tabMetrics) tabMetrics.style.display = '';
+  // }
   show(notifBell);
   startNotifPolling();
   updateTzBadge();
@@ -485,7 +496,6 @@ loginForm.addEventListener('submit', async (e) => {
   try {
     const data = await api('/api/auth/login', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ pin: pinInput.value.trim() })
     });
     const enteredPin = pinInput.value.trim();
@@ -516,7 +526,7 @@ registerForm.addEventListener('submit', async (e) => {
   try {
     const data = await api('/api/auth/register', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+
       body: JSON.stringify(Object.fromEntries(fd.entries()))
     });
     const regPin = fd.get('pin');
@@ -564,7 +574,6 @@ forgotPinSend.addEventListener('click', async () => {
   try {
     const result = await api('/api/auth/forgot-pin', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ fullName: name, contact })
     });
     msg(forgotPinMessage, result.message, 'success');
@@ -756,9 +765,8 @@ popupBookingForm.addEventListener('submit', async (e) => {
   try {
     await api('/api/bookings', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pin: state.pin,
+
         roomId: roomSelect.value,
         date: dateInput.value,
         startHour: Number(popupStartHour.value),
@@ -816,8 +824,7 @@ async function doFullCancel(bookingId) {
   try {
     await api(`/api/bookings/${bookingId}/cancel`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({})
     });
     msg(bookingMessage, 'Бронирование отменено.', 'success');
     hide(cancelPopup);
@@ -831,8 +838,7 @@ async function doSlotCancel(bookingId, slotHour) {
   try {
     await api(`/api/bookings/${bookingId}`, {
       method: 'PATCH',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, cancelHour: slotHour })
+      body: JSON.stringify({ cancelHour: slotHour })
     });
     msg(bookingMessage, 'Слот отменён.', 'success');
     hide(cancelPopup);
@@ -861,8 +867,7 @@ suggestForm.addEventListener('submit', async (e) => {
   try {
     const result = await api('/api/suggestions', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, text: suggestForm.text.value.trim() })
+      body: JSON.stringify({ text: suggestForm.text.value.trim() })
     });
     suggestForm.reset();
     msg(suggestMessage, result.message, 'success');
@@ -946,9 +951,8 @@ profileSaveBtn.addEventListener('click', async () => {
   try {
     const result = await api('/api/profile/update', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pin: state.pin,
+
         contact: profileContact.value.trim(),
         position: profilePosition.value.trim(),
         workLocation: profileWorkLocation.value,
@@ -1066,7 +1070,7 @@ ticketForm.addEventListener('submit', async (e) => {
   try {
     const result = await api('/api/tickets', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+
       body: JSON.stringify(fd)
     });
     ticketForm.reset();
@@ -1086,8 +1090,7 @@ async function updatePinBadge() {
   try {
     const data = await api('/api/admin/pin-requests', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({})
     });
     if (data.length > 0) {
       pinRequestsBadge.textContent = data.length;
@@ -1117,7 +1120,6 @@ $('notifReadAll')?.addEventListener('click', async () => {
   try {
     await api('/api/notifications/read', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids: 'all' })
     });
     notifBadge.textContent = '';
@@ -1135,7 +1137,6 @@ notifList?.addEventListener('click', async (e) => {
     try {
       await api('/api/notifications/read', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ ids: [nid] })
       });
       loadNotifCount();
@@ -1194,8 +1195,7 @@ async function loadAdminData(type, page) {
   try {
     const data = await api(`/api/admin/${type}`, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, page: currentPage, pageSize: ADMIN_PAGE_SIZE })
+      body: JSON.stringify({ page: currentPage, pageSize: ADMIN_PAGE_SIZE })
     });
     renderAdminTable(type, data);
   } catch (err) {
@@ -1207,8 +1207,7 @@ async function loadCrmConfigAdmin() {
   try {
     const cfg = await api('/api/admin/crm-config', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({})
     });
     renderCrmConfigAdmin(cfg);
   } catch (err) {
@@ -1245,8 +1244,8 @@ function renderCrmConfigAdmin(cfg) {
       try {
         await api('/api/admin/crm-config-delete', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, field: btn.dataset.crmField, value: btn.dataset.crmValue })
+
+          body: JSON.stringify({ field: btn.dataset.crmField, value: btn.dataset.crmValue })
         });
         await loadCrmConfigAdmin();
       } catch (err) { adminMsg(err.message); }
@@ -1262,8 +1261,8 @@ function renderCrmConfigAdmin(cfg) {
       try {
         await api('/api/admin/crm-config-add', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, field: form.dataset.crmField, value })
+
+          body: JSON.stringify({ field: form.dataset.crmField, value })
         });
         input.value = '';
         await loadCrmConfigAdmin();
@@ -1430,8 +1429,7 @@ async function renderRolesAccess() {
         try {
           await api('/api/admin/access/roles', {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-            body: JSON.stringify({ name, description: $('raNewRoleDesc').value.trim(), permissions })
+                        body: JSON.stringify({ name, description: $('raNewRoleDesc').value.trim(), permissions })
           });
           showToast('Роль создана', 'ok');
           await renderRolesAccess();
@@ -1472,8 +1470,7 @@ async function renderRolesAccess() {
           try {
             await api('/api/admin/access/roles/' + encodeURIComponent(rid), {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-              body: JSON.stringify({ name, description: det.querySelector('.raEditDesc').value.trim(), permissions })
+                            body: JSON.stringify({ name, description: det.querySelector('.raEditDesc').value.trim(), permissions })
             });
             showToast('Роль обновлена', 'ok');
             await renderRolesAccess();
@@ -1489,8 +1486,7 @@ async function renderRolesAccess() {
         try {
           await api('/api/admin/access/roles/' + encodeURIComponent(btn.dataset.rid), {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-            body: JSON.stringify({})
+                        body: JSON.stringify({})
           });
           showToast('Роль удалена', 'ok');
           await renderRolesAccess();
@@ -1538,15 +1534,13 @@ async function renderRolesAccess() {
           if (isEdit) {
             await api('/api/admin/access/groups/' + encodeURIComponent(group.id), {
               method: 'PUT',
-              headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-              body: JSON.stringify(body)
+                            body: JSON.stringify(body)
             });
             showToast('Группа обновлена', 'ok');
           } else {
             await api('/api/admin/access/groups', {
               method: 'POST',
-              headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-              body: JSON.stringify(body)
+                            body: JSON.stringify(body)
             });
             showToast('Группа создана', 'ok');
           }
@@ -1558,8 +1552,7 @@ async function renderRolesAccess() {
         try {
           await api('/api/admin/access/groups/' + encodeURIComponent(group.id), {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-            body: JSON.stringify({})
+                        body: JSON.stringify({})
           });
           showToast('Группа удалена', 'ok');
           await renderRolesAccess();
@@ -1582,8 +1575,7 @@ async function renderRolesAccess() {
         try {
           await api('/api/admin/access/user-role', {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json', 'Origin': location.origin },
-            body: JSON.stringify({ userId: sel.dataset.uid, roleId: sel.value })
+                        body: JSON.stringify({ userId: sel.dataset.uid, roleId: sel.value })
           });
           showToast('Роль обновлена', 'ok');
         } catch (err) { showToast(err.message, 'danger'); sel.value = sel.querySelector('option[selected]')?.value || 'employee'; }
@@ -1711,8 +1703,7 @@ async function handleAdminAction(e) {
     try {
       await api(`/api/bookings/${btn.dataset.id}/cancel`, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin })
+        body: JSON.stringify({})
       });
       loadAdminData('bookings');
     } catch (err) { adminMsg(err.message); }
@@ -1722,8 +1713,7 @@ async function handleAdminAction(e) {
     try {
       await api('/api/admin/set-role', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, targetId: btn.dataset.id, role })
+        body: JSON.stringify({ targetId: btn.dataset.id, role })
       });
       loadAdminData('users');
     } catch (err) { adminMsg(err.message); }
@@ -1732,8 +1722,7 @@ async function handleAdminAction(e) {
     try {
       await api('/api/admin/pin-request-resolve', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, requestId: btn.dataset.id })
+        body: JSON.stringify({ requestId: btn.dataset.id })
       });
       loadAdminData('pin-requests');
       updatePinBadge();
@@ -1762,9 +1751,8 @@ editUserForm.addEventListener('submit', async (e) => {
   try {
     const result = await api('/api/admin/update-user', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        pin: state.pin,
+
         targetId: editUserOriginalPin.value,
         fullName: editUserName.value.trim(),
         contact: editUserContact.value.trim(),
@@ -1856,8 +1844,7 @@ async function updateTzBadge() {
   try {
     const stats = await api('/api/admin/tz-stats', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({})
     });
     const problems = (stats.overdue || 0) + (stats.deadline_soon || 0);
     const badge = tabTz.querySelector('.tab-count-badge');
@@ -2200,8 +2187,7 @@ async function exportTzExcel() {
   try {
     const res = await fetch('/api/admin/tz-export', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, ...state.tzFilters, ...(state.tzBoardId ? { board_id: state.tzBoardId } : {}) })
+      body: JSON.stringify({ ...state.tzFilters, ...(state.tzBoardId ? { board_id: state.tzBoardId } : {}) })
     });
     if (!res.ok) {
       const err = await res.json().catch(() => ({}));
@@ -2361,8 +2347,7 @@ function initTzBulk() {
     try {
       const result = await api('/api/admin/tz-bulk', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, ids, action, value })
+        body: JSON.stringify({ ids, action, value })
       });
       showToast(result.message, 'ok');
       loadTzData();
@@ -2383,18 +2368,18 @@ async function loadTzData() {
   const boardPayload = state.tzBoardId ? { board_id: state.tzBoardId } : {};
   try {
     if (state.tzViewMode === 'kanban') {
-      const kanbanBody = { pin: state.pin, ...state.tzFilters, ...boardPayload };
+      const kanbanBody = { ...state.tzFilters, ...boardPayload };
       if (state.tzSwimlane) kanbanBody.swimlane = state.tzSwimlane;
       const [kanban, stats] = await Promise.all([
         api('/api/admin/tz-kanban', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+
           body: JSON.stringify(kanbanBody)
         }),
         api('/api/admin/tz-stats', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, ...boardPayload })
+
+          body: JSON.stringify({ ...boardPayload })
         })
       ]);
       renderTzStats(stats);
@@ -2405,13 +2390,13 @@ async function loadTzData() {
       const [resp, stats] = await Promise.all([
         api('/api/admin/tz', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, ...state.tzFilters, ...boardPayload, pageSize: 999 })
+
+          body: JSON.stringify({ ...state.tzFilters, ...boardPayload, pageSize: 999 })
         }),
         api('/api/admin/tz-stats', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, ...boardPayload })
+
+          body: JSON.stringify({ ...boardPayload })
         })
       ]);
       const items = Array.isArray(resp) ? resp : (resp.items || []);
@@ -2521,9 +2506,9 @@ function openTzCreateForm(presetType) {
       try {
         await api('/api/tz-templates', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+
           body: JSON.stringify({
-            pin: state.pin, name,
+            name,
             fields: { system: $('tzSystem').value, type: $('tzType').value, priority: $('tzPriority').value, description: $('tzDescription').value, owner: $('tzOwner').value }
           })
         });
@@ -2626,8 +2611,8 @@ async function openTzDetail(id) {
           try {
             const result = await api(`/api/tz/${id}/approve`, {
               method: 'PATCH',
-              headers: { 'Content-Type': 'application/json' },
-              body: JSON.stringify({ pin: state.pin })
+    
+              body: JSON.stringify({})
             });
             msg(tzPopupMessage, result.message, 'success');
             setTimeout(() => openTzDetail(id), 600);
@@ -2674,8 +2659,8 @@ async function openTzDetail(id) {
       try {
         const result = await api(`/api/tz/${id}/watch`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin })
+
+          body: JSON.stringify({})
         });
         showToast(result.watching ? 'Вы подписались на обновления' : 'Вы отписались', 'ok');
         openTzDetail(id); // refresh
@@ -2818,7 +2803,7 @@ function renderTzLinkedTasks(tzId, data) {
             el.addEventListener('click', async () => {
               const newLinks = [...links, el.dataset.id];
               try {
-                await api(`/api/tz/${tzId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: state.pin, linked_tz_ids: newLinks }) });
+                await api(`/api/tz/${tzId}`, { method: 'PUT', body: JSON.stringify({ linked_tz_ids: newLinks }) });
                 openTzDetail(tzId);
               } catch (err) { showToast(err.message, 'danger'); }
             });
@@ -2835,7 +2820,7 @@ function renderTzLinkedTasks(tzId, data) {
       e.stopPropagation();
       const newLinks = links.filter((l) => l !== btn.dataset.lid);
       try {
-        await api(`/api/tz/${tzId}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ pin: state.pin, linked_tz_ids: newLinks }) });
+        await api(`/api/tz/${tzId}`, { method: 'PUT', body: JSON.stringify({ linked_tz_ids: newLinks }) });
         openTzDetail(tzId);
       } catch (err) { showToast(err.message, 'danger'); }
     });
@@ -2853,7 +2838,7 @@ tzForm.addEventListener('submit', async (e) => {
   tzSubmitBtn.disabled = true;
 
   const body = {
-    pin: state.pin,
+
     title: $('tzTitle').value.trim(),
     system: $('tzSystem').value,
     type: $('tzType').value,
@@ -2878,14 +2863,14 @@ tzForm.addEventListener('submit', async (e) => {
     if (state.tzEditId) {
       const result = await api(`/api/tz/${state.tzEditId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+
         body: JSON.stringify(body)
       });
       msg(tzPopupMessage, result.message, 'success');
     } else {
       const result = await api('/api/tz', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+
         body: JSON.stringify(body)
       });
       msg(tzPopupMessage, result.message, 'success');
@@ -3086,8 +3071,7 @@ function initKanbanDnD() {
     try {
       await api(`/api/tz/${dragTzId}/status`, {
         method: 'PATCH',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ pin: state.pin, status: targetStatus })
+        body: JSON.stringify({ status: targetStatus })
       });
       showToast('Статус изменён', 'ok');
       loadTzData();
@@ -3140,9 +3124,8 @@ function openCreateBoardModal() {
     try {
       const result = await api('/api/boards', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          pin: state.pin,
+  
           name: document.getElementById('bcName').value.trim(),
           code_prefix: document.getElementById('bcPrefix').value.trim() || 'BD',
           description: document.getElementById('bcDesc').value.trim(),
@@ -3250,9 +3233,9 @@ function openBoardSettingsModal() {
       try {
         const result = await api(`/api/boards/${board.id}`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+
           body: JSON.stringify({
-            pin: state.pin,
+    
             name: document.getElementById('bsName').value.trim(),
             code_prefix: document.getElementById('bsPrefix').value.trim(),
             description: document.getElementById('bsDesc').value.trim(),
@@ -3276,8 +3259,8 @@ function openBoardSettingsModal() {
       try {
         await api(`/api/boards/${board.id}`, {
           method: 'DELETE',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin })
+
+          body: JSON.stringify({})
         });
         state.tzBoards = state.tzBoards.filter(b => b.id !== board.id);
         if (state.tzConfig) state.tzConfig.boards = state.tzBoards;
@@ -3301,8 +3284,8 @@ function openBoardSettingsModal() {
         try {
           const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin, name: newName })
+  
+            body: JSON.stringify({ name: newName })
           });
           updateBoardInState(board, result.board);
         } catch (err) { showToast(err.message, 'danger'); }
@@ -3316,8 +3299,8 @@ function openBoardSettingsModal() {
         try {
           const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin, color: inp.value })
+  
+            body: JSON.stringify({ color: inp.value })
           });
           updateBoardInState(board, result.board);
         } catch (err) { showToast(err.message, 'danger'); }
@@ -3331,8 +3314,8 @@ function openBoardSettingsModal() {
         try {
           const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin, wip_limit: parseInt(inp.value, 10) || 0 })
+  
+            body: JSON.stringify({ wip_limit: parseInt(inp.value, 10) || 0 })
           });
           updateBoardInState(board, result.board);
           showToast('WIP-лимит обновлён', 'ok');
@@ -3347,8 +3330,7 @@ function openBoardSettingsModal() {
         try {
           const result = await api(`/api/boards/${board.id}/columns/${colId}/hide`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin })
+            body: JSON.stringify({})
           });
           updateBoardInState(board, result.board);
           refreshSettings();
@@ -3367,8 +3349,8 @@ function openBoardSettingsModal() {
         try {
           const result = await api(`/api/boards/${board.id}/columns/${colId}`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin, target_column: targetCol })
+  
+            body: JSON.stringify({ target_column: targetCol })
           });
           updateBoardInState(board, result.board);
           refreshSettings();
@@ -3384,8 +3366,8 @@ function openBoardSettingsModal() {
       try {
         const result = await api(`/api/boards/${board.id}/columns`, {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ pin: state.pin, name, color })
+
+          body: JSON.stringify({ name, color })
         });
         updateBoardInState(board, result.board);
         refreshSettings();
@@ -3437,8 +3419,8 @@ function openBoardSettingsModal() {
         try {
           const result = await api(`/api/boards/${board.id}/columns/reorder`, {
             method: 'PATCH',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin, order })
+  
+            body: JSON.stringify({ order })
           });
           updateBoardInState(board, result.board);
         } catch (err) { showToast(err.message, 'danger'); }
@@ -3691,8 +3673,8 @@ async function renderKbArticle() {
         try {
           await api(`/api/kb/articles/${article.id}`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin })
+  
+            body: JSON.stringify({})
           });
           showToast('Статья удалена', 'ok');
           state.kbView = article.category_id ? 'articles' : 'categories';
@@ -3861,7 +3843,7 @@ async function openKbEditor(article) {
       try {
         await api('/api/kb/templates', {
           method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
+
           body: JSON.stringify({ name: name.trim(), description: '', content })
         });
         showToast('Шаблон сохранён', 'ok');
@@ -3923,7 +3905,7 @@ kbEditorForm.addEventListener('submit', async (e) => {
   kbEditorSubmitBtn.textContent = '⏳ Сохранение...';
 
   const body = {
-    pin: state.pin,
+
     title: kbEditorTitleInput.value.trim(),
     category_id: kbEditorCategory.value,
     pinned: kbEditorPinned.checked,
@@ -3934,14 +3916,14 @@ kbEditorForm.addEventListener('submit', async (e) => {
     if (state.kbEditId) {
       await api(`/api/kb/articles/${state.kbEditId}`, {
         method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
+
         body: JSON.stringify(body)
       });
       msg(kbEditorMessage, 'Статья обновлена.', 'success');
     } else {
       await api('/api/kb/articles', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+
         body: JSON.stringify(body)
       });
       msg(kbEditorMessage, 'Статья создана.', 'success');
@@ -4017,7 +3999,7 @@ async function showKbHistory(articleId) {
         try {
           await api(`/api/kb/articles/${btn.dataset.aid}/restore/${btn.dataset.vid}`, {
             method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+  
             body: JSON.stringify({})
           });
           showToast('Версия восстановлена', 'ok');
@@ -4167,7 +4149,6 @@ async function saveKbCatOrder() {
   try {
     await api('/api/kb/categories/reorder', {
       method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ ids })
     });
   } catch (err) {
@@ -4206,7 +4187,7 @@ async function renderKbCategoriesList() {
         try {
           await api(`/api/kb/categories/${sel.dataset.catId}`, {
             method: 'PUT',
-            headers: { 'Content-Type': 'application/json' },
+  
             body: JSON.stringify({ group_id: sel.value || null })
           });
           showToast('Группа обновлена', 'ok');
@@ -4266,8 +4247,8 @@ async function renderKbCategoriesList() {
         try {
           await api(`/api/kb/categories/${delBtn.dataset.catId}`, {
             method: 'DELETE',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ pin: state.pin })
+  
+            body: JSON.stringify({})
           });
           await renderKbCategoriesList();
         } catch (err) {
@@ -4287,8 +4268,7 @@ kbCatAddBtn.addEventListener('click', async () => {
   try {
     await api('/api/kb/categories', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, name })
+      body: JSON.stringify({ name })
     });
     kbCatNameInput.value = '';
     await renderKbCategoriesList();
@@ -4331,7 +4311,7 @@ async function openKbGroupsManager() {
       const name = document.getElementById('kbGroupNameInput').value.trim();
       if (!name) return;
       try {
-        await api('/api/kb/groups', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name }) });
+        await api('/api/kb/groups', { method: 'POST', body: JSON.stringify({ name }) });
         document.getElementById('kbGroupNameInput').value = '';
         renderKbGroupsList();
       } catch (err) { msg(document.getElementById('kbGroupsMessage'), err.message, 'error'); }
@@ -4376,7 +4356,7 @@ async function renderKbGroupsList() {
       btn.addEventListener('click', async () => {
         if (!confirm('Удалить группу? Категории станут публичными.')) return;
         try {
-          await api(`/api/kb/groups/${btn.dataset.gid}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+          await api(`/api/kb/groups/${btn.dataset.gid}`, { method: 'DELETE', body: JSON.stringify({}) });
           renderKbGroupsList();
         } catch (err) { msg(msgEl, err.message, 'error'); }
       });
@@ -4391,7 +4371,7 @@ async function renderKbGroupsList() {
         if (!g) return;
         const newMembers = (g.members || []).filter(m => m !== uid);
         try {
-          await api(`/api/kb/groups/${gid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members: newMembers }) });
+          await api(`/api/kb/groups/${gid}`, { method: 'PUT', body: JSON.stringify({ members: newMembers }) });
           renderKbGroupsList();
         } catch (err) { msg(msgEl, err.message, 'error'); }
       });
@@ -4406,7 +4386,7 @@ async function renderKbGroupsList() {
         if (!g) return;
         const newMembers = [...(g.members || []), sel.value];
         try {
-          await api(`/api/kb/groups/${gid}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ members: newMembers }) });
+          await api(`/api/kb/groups/${gid}`, { method: 'PUT', body: JSON.stringify({ members: newMembers }) });
           renderKbGroupsList();
         } catch (err) { msg(msgEl, err.message, 'error'); }
       });
@@ -4460,7 +4440,7 @@ async function openKbSharePopup(article) {
       try {
         await api(`/api/kb/articles/${article.id}/share`, {
           method: 'PUT',
-          headers: { 'Content-Type': 'application/json' },
+
           body: JSON.stringify({ shared_with: selected })
         });
         showToast('Доступ обновлён', 'ok');
@@ -4781,8 +4761,7 @@ async function loadAiTasks() {
   try {
     const tasks = await api('/api/admin/ai-tasks', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin })
+      body: JSON.stringify({})
     });
     renderAiChat(tasks);
   } catch (err) {
@@ -4828,8 +4807,7 @@ async function submitAiTask() {
   try {
     await api('/api/admin/ai-task', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, prompt })
+      body: JSON.stringify({ prompt })
     });
     aiPromptInput.value = '';
     await loadAiTasks();
@@ -4844,8 +4822,7 @@ async function cancelAiTask(taskId) {
   try {
     await api('/api/admin/ai-task-cancel', {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ pin: state.pin, taskId })
+      body: JSON.stringify({ taskId })
     });
     await loadAiTasks();
   } catch (err) {
@@ -5064,10 +5041,10 @@ async function openTaskForm(task) {
     if (isEdit) body.status = overlay.querySelector('#taskStatus')?.value || task.status;
     try {
       if (isEdit) {
-        await api(`/api/tasks/${task.id}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await api(`/api/tasks/${task.id}`, { method: 'PUT', body: JSON.stringify(body) });
         showToast('Задача обновлена', 'ok');
       } else {
-        await api('/api/tasks', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(body) });
+        await api('/api/tasks', { method: 'POST', body: JSON.stringify(body) });
         showToast('Задача создана', 'ok');
       }
       overlay.remove();
@@ -5078,7 +5055,7 @@ async function openTaskForm(task) {
   overlay.querySelector('#taskDeleteBtn')?.addEventListener('click', async () => {
     if (!confirm('Удалить задачу?')) return;
     try {
-      await api(`/api/tasks/${task.id}`, { method: 'DELETE', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({}) });
+      await api(`/api/tasks/${task.id}`, { method: 'DELETE', body: JSON.stringify({}) });
       showToast('Задача удалена', 'ok');
       overlay.remove();
       loadTasks();
@@ -5088,7 +5065,7 @@ async function openTaskForm(task) {
   // Proposal review buttons
   overlay.querySelector('#taskApproveBtn')?.addEventListener('click', async () => {
     try {
-      await api(`/api/tasks/${task.id}/review`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'approved' }) });
+      await api(`/api/tasks/${task.id}/review`, { method: 'PATCH', body: JSON.stringify({ decision: 'approved' }) });
       showToast('Предложение одобрено', 'ok');
       overlay.remove();
       loadTasks();
@@ -5097,7 +5074,7 @@ async function openTaskForm(task) {
 
   overlay.querySelector('#taskRejectBtn')?.addEventListener('click', async () => {
     try {
-      await api(`/api/tasks/${task.id}/review`, { method: 'PATCH', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ decision: 'rejected' }) });
+      await api(`/api/tasks/${task.id}/review`, { method: 'PATCH', body: JSON.stringify({ decision: 'rejected' }) });
       showToast('Предложение отклонено', 'ok');
       overlay.remove();
       loadTasks();
