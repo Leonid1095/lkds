@@ -871,5 +871,14 @@
     "new_value": "development",
     "changed_by": "Фатыхов Ленар Рустамович",
     "changed_at": "2026-03-05T06:40:01.625Z"
+  },
+  {
+    "id": "ae0c21a8-9e49-4da9-8125-7629e728916e",
+    "tz_id": "161c7fe3-46a3-4b22-aead-e9f555f8d226",
+    "field": "status",
+    "old_value": "analysis",
+    "new_value": "production",
+    "changed_by": "Фатыхов Ленар Рустамович",
+    "changed_at": "2026-03-10T14:33:07.322Z"
   }
 ]

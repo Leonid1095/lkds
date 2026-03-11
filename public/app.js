@@ -364,6 +364,200 @@ document.querySelectorAll('.tab').forEach((tab) => {
   tab.addEventListener('click', () => switchToTab(tab.dataset.tab));
 });
 
+/* ── UI Customization (per-user tabs & widgets) ── */
+
+const ALL_TABS = [
+  { id: 'schedule', label: 'Переговорки', alwaysAvailable: true },
+  { id: 'crm', label: 'Заявка 1С CRM', alwaysAvailable: true },
+  { id: 'tz', label: 'ТЗ' },
+  { id: 'tasks', label: 'Мои задачи' },
+  { id: 'ai', label: 'AI' },
+  { id: 'kb', label: 'База знаний' },
+  { id: 'metrics', label: 'Метрики' },
+  { id: 'links', label: 'Ссылки', alwaysAvailable: true }
+];
+
+const ALL_WIDGETS = [
+  { id: 'tz-stats', label: 'Статистика ТЗ', section: 'ТЗ' },
+  { id: 'tz-filters', label: 'Фильтры ТЗ', section: 'ТЗ' },
+  { id: 'schedule-controls', label: 'Контроль переговорок', section: 'Переговорки' },
+  { id: 'tasks-filters', label: 'Фильтры задач', section: 'Мои задачи' },
+  { id: 'kb-search', label: 'Поиск KB', section: 'База знаний' }
+];
+
+let _userPrefs = { tabs: null, hiddenWidgets: [] };
+
+async function loadUserPrefs() {
+  try {
+    const prefs = await api('/api/user-prefs');
+    _userPrefs = { tabs: prefs.tabs || null, hiddenWidgets: prefs.hiddenWidgets || [] };
+  } catch { /* defaults */ }
+}
+
+async function saveUserPrefs() {
+  try {
+    await api('/api/user-prefs', { method: 'PUT', body: JSON.stringify(_userPrefs) });
+  } catch { /* silent */ }
+}
+
+function applyTabOrder() {
+  const nav = $('mainTabs');
+  const settingsBtn = $('tabSettingsBtn');
+  if (!nav) return;
+
+  const tabOrder = _userPrefs.tabs ? _userPrefs.tabs.order : ALL_TABS.map(t => t.id);
+  const hiddenTabs = _userPrefs.tabs ? (_userPrefs.tabs.hidden || []) : [];
+
+  // Reorder DOM
+  const tabEls = {};
+  nav.querySelectorAll('.tab[data-tab]').forEach(el => { tabEls[el.dataset.tab] = el; });
+
+  for (const tabId of tabOrder) {
+    if (tabEls[tabId]) nav.insertBefore(tabEls[tabId], settingsBtn);
+  }
+  // Append any tabs not in order (new ones)
+  for (const t of ALL_TABS) {
+    if (!tabOrder.includes(t.id) && tabEls[t.id]) nav.insertBefore(tabEls[t.id], settingsBtn);
+  }
+
+  // Apply hidden (user-hidden tabs get display:none even if they'd otherwise show)
+  for (const tabId of hiddenTabs) {
+    const el = tabEls[tabId];
+    if (el) el.dataset.userHidden = '1';
+  }
+}
+
+function applyWidgetVisibility() {
+  const hidden = _userPrefs.hiddenWidgets || [];
+  for (const wid of ALL_WIDGETS) {
+    const el = document.querySelector(`[data-widget="${wid.id}"]`);
+    if (el) {
+      el.style.display = hidden.includes(wid.id) ? 'none' : '';
+    }
+  }
+}
+
+function isTabUserHidden(tabId) {
+  return _userPrefs.tabs && (_userPrefs.tabs.hidden || []).includes(tabId);
+}
+
+function renderUiSettings() {
+  const tabsList = $('uiTabsList');
+  const widgetsList = $('uiWidgetsList');
+  if (!tabsList || !widgetsList) return;
+
+  const order = _userPrefs.tabs ? _userPrefs.tabs.order : ALL_TABS.map(t => t.id);
+  const hiddenTabs = _userPrefs.tabs ? (_userPrefs.tabs.hidden || []) : [];
+
+  // Tabs
+  let html = '';
+  const orderedTabs = order.map(id => ALL_TABS.find(t => t.id === id)).filter(Boolean);
+  // Add any missing tabs
+  for (const t of ALL_TABS) {
+    if (!orderedTabs.find(ot => ot.id === t.id)) orderedTabs.push(t);
+  }
+
+  for (const t of orderedTabs) {
+    const visible = !hiddenTabs.includes(t.id);
+    html += `<div class="ui-tab-row" draggable="true" data-tab-id="${t.id}">
+      <span class="ui-tab-drag"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="8" y1="6" x2="8" y2="6.01"/><line x1="16" y1="6" x2="16" y2="6.01"/><line x1="8" y1="12" x2="8" y2="12.01"/><line x1="16" y1="12" x2="16" y2="12.01"/><line x1="8" y1="18" x2="8" y2="18.01"/><line x1="16" y1="18" x2="16" y2="18.01"/></svg></span>
+      <span class="ui-tab-name">${t.label}</span>
+      <label class="ui-tab-toggle"><input type="checkbox" data-tab-toggle="${t.id}" ${visible ? 'checked' : ''} /><span class="toggle-slider"></span></label>
+    </div>`;
+  }
+  tabsList.innerHTML = html;
+
+  // Widgets
+  let wHtml = '';
+  const hiddenWidgets = _userPrefs.hiddenWidgets || [];
+  for (const w of ALL_WIDGETS) {
+    const visible = !hiddenWidgets.includes(w.id);
+    wHtml += `<div class="ui-widget-row">
+      <span class="ui-widget-section">${w.section}</span>
+      <span class="ui-widget-name">${w.label}</span>
+      <label class="ui-tab-toggle"><input type="checkbox" data-widget-toggle="${w.id}" ${visible ? 'checked' : ''} /><span class="toggle-slider"></span></label>
+    </div>`;
+  }
+  widgetsList.innerHTML = wHtml;
+
+  // Drag-and-drop for tabs
+  let dragSrc = null;
+  tabsList.querySelectorAll('.ui-tab-row').forEach(row => {
+    row.addEventListener('dragstart', (e) => {
+      dragSrc = row;
+      row.classList.add('dragging');
+      e.dataTransfer.effectAllowed = 'move';
+    });
+    row.addEventListener('dragend', () => {
+      row.classList.remove('dragging');
+      tabsList.querySelectorAll('.ui-tab-row').forEach(r => r.classList.remove('drag-over'));
+    });
+    row.addEventListener('dragover', (e) => {
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'move';
+      if (row !== dragSrc) row.classList.add('drag-over');
+    });
+    row.addEventListener('dragleave', () => row.classList.remove('drag-over'));
+    row.addEventListener('drop', (e) => {
+      e.preventDefault();
+      row.classList.remove('drag-over');
+      if (dragSrc && dragSrc !== row) {
+        const allRows = [...tabsList.querySelectorAll('.ui-tab-row')];
+        const srcIdx = allRows.indexOf(dragSrc);
+        const tgtIdx = allRows.indexOf(row);
+        if (srcIdx < tgtIdx) row.after(dragSrc);
+        else row.before(dragSrc);
+      }
+    });
+  });
+}
+
+function collectUiSettings() {
+  const tabsList = $('uiTabsList');
+  const order = [];
+  const hidden = [];
+  tabsList.querySelectorAll('.ui-tab-row').forEach(row => {
+    const id = row.dataset.tabId;
+    order.push(id);
+    const cb = row.querySelector('input[data-tab-toggle]');
+    if (cb && !cb.checked) hidden.push(id);
+  });
+  _userPrefs.tabs = { order, hidden };
+
+  const hiddenWidgets = [];
+  document.querySelectorAll('input[data-widget-toggle]').forEach(cb => {
+    if (!cb.checked) hiddenWidgets.push(cb.dataset.widgetToggle);
+  });
+  _userPrefs.hiddenWidgets = hiddenWidgets;
+}
+
+// Event handlers
+$('tabSettingsBtn')?.addEventListener('click', () => {
+  renderUiSettings();
+  show($('uiSettingsPopup'));
+});
+$('uiSettingsCancel')?.addEventListener('click', () => hide($('uiSettingsPopup')));
+$('uiSettingsSave')?.addEventListener('click', async () => {
+  collectUiSettings();
+  await saveUserPrefs();
+  applyTabOrder();
+  applyWidgetVisibility();
+  showMain();
+  hide($('uiSettingsPopup'));
+  showToast('Настройки сохранены', 'ok');
+});
+$('uiSettingsReset')?.addEventListener('click', async () => {
+  _userPrefs = { tabs: null, hiddenWidgets: [] };
+  await saveUserPrefs();
+  // Remove user-hidden flags
+  document.querySelectorAll('.tab[data-user-hidden]').forEach(el => delete el.dataset.userHidden);
+  applyTabOrder();
+  applyWidgetVisibility();
+  showMain();
+  hide($('uiSettingsPopup'));
+  showToast('Настройки сброшены', 'ok');
+});
+
 async function restoreFromHash() {
   const h = parseHash();
   if (!h.tab) return;
@@ -463,16 +657,30 @@ function showMain() {
       if (state.permissions?.boards && Array.isArray(state.permissions.boards) && state.permissions.boards.includes(b.id)) return true;
       return false;
     });
-  tabTz.style.display = (state.pin && hasTzAccess) ? '' : 'none';
-  tabAi.style.display = state.adminRole === 'superadmin' ? '' : 'none';
-  tabKb.style.display = state.pin ? '' : 'none';
-  const tabTasks = $('tabTasks');
-  if (tabTasks) tabTasks.style.display = state.pin ? '' : 'none';
-  // Метрики скрыты до востребования
-  // if (metricsContent) {
-  //   const tabMetrics = $('tabMetrics');
-  //   if (tabMetrics) tabMetrics.style.display = '';
-  // }
+  // System visibility rules
+  const tabVisibility = {
+    tz: state.pin && hasTzAccess,
+    ai: state.adminRole === 'superadmin',
+    kb: !!state.pin,
+    tasks: !!state.pin,
+    metrics: false, // скрыты до востребования
+    schedule: true,
+    crm: true,
+    links: true
+  };
+
+  // Apply: system rule AND user preference
+  document.querySelectorAll('.tab[data-tab]').forEach(tab => {
+    const id = tab.dataset.tab;
+    const systemVisible = tabVisibility[id] !== undefined ? tabVisibility[id] : true;
+    const userHidden = isTabUserHidden(id);
+    tab.style.display = (systemVisible && !userHidden) ? '' : 'none';
+  });
+
+  // Show settings gear
+  const settingsBtn = $('tabSettingsBtn');
+  if (settingsBtn) show(settingsBtn);
+
   show(notifBell);
   startNotifPolling();
   updateTzBadge();
@@ -606,6 +814,11 @@ async function loadApp() {
   } catch { /* no tz-config */ }
 
   try { state.roles = await api('/api/roles'); } catch { state.roles = []; }
+
+  // Load user UI preferences
+  await loadUserPrefs();
+  applyTabOrder();
+  applyWidgetVisibility();
 
   renderRooms();
   renderLinks(links);
@@ -2063,7 +2276,7 @@ function renderTzFilters() {
 
   const curBoardCf = getBoardCardFields(getCurrentBoard());
   tzFilters.innerHTML = `${boardTabsHtml}
-    <div class="tz-filters-row">
+    <div class="tz-filters-row" data-widget="tz-filters">
       ${curBoardCf.system ? `<select class="tz-filter-select" id="tzFilterSystem">${systemOpts}</select>` : ''}
       <select class="tz-filter-select" id="tzFilterStatus">${statusOpts}</select>
       <select class="tz-filter-select" id="tzFilterType">${typeOpts}</select>
@@ -2090,7 +2303,7 @@ function renderTzFilters() {
       </select>` : ''}
       </div>
     </div>
-    <div class="tz-filters-row">
+    <div class="tz-filters-row" data-widget="tz-filters">
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterOverdue"${f.overdue ? ' checked' : ''} /> Просрочено</label>
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterDeadlineSoon"${f.deadline_soon ? ' checked' : ''} /> Скоро дедлайн</label>
       <label class="tz-checkbox-label"><input type="checkbox" id="tzFilterMissingDeadline"${f.missing_deadline ? ' checked' : ''} /> Неполные дедлайны</label>
@@ -2179,6 +2392,7 @@ function renderTzFilters() {
       loadTzData();
     });
   });
+  applyWidgetVisibility();
 }
 
 async function exportTzExcel() {
@@ -2239,7 +2453,7 @@ function renderTzStats(stats) {
   const soonPulse = stats.deadline_soon > 0 ? ' tz-stat-pulse' : '';
   const missingPulse = stats.missing_deadline > 0 ? ' tz-stat-pulse' : '';
   tzStatsBar.innerHTML = `
-    <div class="tz-stats-row">
+    <div class="tz-stats-row" data-widget="tz-stats">
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.total}</div><div class="tz-stat-label">Всего</div></div>
       <div class="tz-stat-card tz-stat-danger${overduePulse}"><div class="tz-stat-num">${stats.overdue}</div><div class="tz-stat-label">Просрочено</div></div>
       <div class="tz-stat-card tz-stat-warn${soonPulse}"><div class="tz-stat-num">${stats.deadline_soon}</div><div class="tz-stat-label">Скоро</div></div>
@@ -2247,6 +2461,7 @@ function renderTzStats(stats) {
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_dates}</div><div class="tz-stat-label">Без дат</div></div>
       <div class="tz-stat-card"><div class="tz-stat-num">${stats.no_owner}</div><div class="tz-stat-label">Без ответств.</div></div>
     </div>`;
+  applyWidgetVisibility();
 }
 
 function renderTzList(items) {
@@ -3467,7 +3682,7 @@ async function renderKbCategories() {
   if (isSuperadmin) {
     toolbarHtml += '<button class="kb-gear-btn" id="kbManageCatsBtn" type="button" title="Управление категориями"><svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="3"/><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9"/></svg></button>';
   }
-  toolbarHtml += '</div><div class="kb-search-row"><input class="kb-search-input" id="kbSearchInput" placeholder="Поиск по статьям..." /></div>';
+  toolbarHtml += '</div><div class="kb-search-row" data-widget="kb-search"><input class="kb-search-input" id="kbSearchInput" placeholder="Поиск по статьям..." /></div>';
   kbToolbar.innerHTML = toolbarHtml;
 
   if (isSuperadmin) {
@@ -3510,6 +3725,7 @@ async function renderKbCategories() {
         loadKbView();
       });
     });
+    applyWidgetVisibility();
   } catch (err) {
     msg(kbMessage, err.message, 'error');
   }
@@ -4914,7 +5130,7 @@ function renderTasks() {
 
   // Toolbar
   tasksToolbar.innerHTML = `
-    <div class="tasks-filters">
+    <div class="tasks-filters" data-widget="tasks-filters">
       <select id="taskFilterStatus">
         <option value="">Все статусы</option>
         ${Object.entries(TASK_STATUS_LABELS).map(([k, v]) => `<option value="${k}"${f.status === k ? ' selected' : ''}>${v}</option>`).join('')}
@@ -4971,6 +5187,7 @@ function renderTasks() {
       if (task) openTaskForm(task);
     });
   });
+  applyWidgetVisibility();
 }
 
 async function openTaskForm(task) {

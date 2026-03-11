@@ -74,7 +74,8 @@ const FILES = {
   notifications: path.join(dataDir, 'notifications.json'),
   kbHistory: path.join(dataDir, 'kb-history.json'),
   tasks: path.join(dataDir, 'tasks.json'),
-  kbTemplates: path.join(dataDir, 'kb-templates.json')
+  kbTemplates: path.join(dataDir, 'kb-templates.json'),
+  userPrefs: path.join(dataDir, 'user-prefs.json')
 };
 
 /* ── Security middleware ── */
@@ -873,6 +874,32 @@ app.post('/api/auth/forgot-pin', loginLimiter, async (req, res) => {
 
 app.get('/api/settings', (_req, res) => {
   res.json({ publicBaseUrl, startHour: 8, endHour: 21, slotStep: 0.5, appName: 'ЛКДС — Портал сотрудника' });
+});
+
+/* ── User Preferences (per-user UI customization) ── */
+
+app.get('/api/user-prefs', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(401).json({ message: 'Требуется авторизация.' });
+  const allPrefs = await readJson(FILES.userPrefs, {});
+  return res.json(allPrefs[user.id] || {});
+});
+
+app.put('/api/user-prefs', async (req, res) => {
+  const pin = getPin(req);
+  const user = await getUserByPin(pin);
+  if (!user) return res.status(401).json({ message: 'Требуется авторизация.' });
+  const { tabs, hiddenWidgets } = req.body;
+
+  return withLock(FILES.userPrefs, async () => {
+    const allPrefs = await readJson(FILES.userPrefs, {});
+    if (!allPrefs[user.id]) allPrefs[user.id] = {};
+    if (tabs !== undefined) allPrefs[user.id].tabs = tabs;
+    if (hiddenWidgets !== undefined) allPrefs[user.id].hiddenWidgets = hiddenWidgets;
+    await writeJson(FILES.userPrefs, allPrefs);
+    return res.json({ message: 'Настройки сохранены.' });
+  });
 });
 
 app.get('/api/crm-config', async (_req, res) => {

@@ -452,7 +452,7 @@
     "system": "TOS",
     "type": "ТЗ",
     "priority": "medium",
-    "status": "analysis",
+    "status": "production",
     "description": "Обновить главную страницу TOS актуальными данными. Это позволит повысить точность информации, сократить время на обработку документов и улучшить взаимодействие между сотрудниками.",
     "owner": "Ахметзянов Альберт Анасович",
     "link_confluence": "https://confluence.lkds.alabuga.ru/x/noU8Aw",
@@ -462,7 +462,7 @@
     "date_release_deadline": null,
     "created_by": "Фатыхов Ленар Рустамович",
     "created_at": "2026-03-03T07:36:03.648Z",
-    "updated_at": "2026-03-03T07:36:08.160Z",
+    "updated_at": "2026-03-10T14:33:07.324Z",
     "board_id": "0577e1cf-67e3-4a04-b57b-7f2863720572"
   },
   {
