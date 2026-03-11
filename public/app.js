@@ -113,6 +113,7 @@ const tzPopup = $('tzPopup');
 const tzForm = $('tzForm');
 const tzPopupTitle = $('tzPopupTitle');
 const tzSubmitBtn = $('tzSubmitBtn');
+const tzDeleteBtn = $('tzDeleteBtn');
 const tzCancelBtn = $('tzCancelBtn');
 const tzPopupMessage = $('tzPopupMessage');
 const tzStatusRow = $('tzStatusRow');
@@ -2637,6 +2638,7 @@ function openTzCreateForm(presetType) {
   tzPopupTitle.querySelector('span').textContent = 'Создать: ' + (typeLabel[type] || type);
   tzSubmitBtn.textContent = 'Создать';
   tzForm.reset();
+  hide(tzDeleteBtn);
   hide(tzMeta);
   hide(tzHistorySection);
   hide(tzCommentsSection);
@@ -2754,6 +2756,9 @@ async function openTzDetail(id) {
 
     tzPopupTitle.querySelector('span').textContent = `${data.tz_code} — ${data.type}`;
     tzSubmitBtn.textContent = 'Сохранить';
+
+    // Delete button — superadmin only
+    if (isSA) { show(tzDeleteBtn); } else { hide(tzDeleteBtn); }
 
     // Populate selects
     $('tzSystem').innerHTML = cfg.systems.map((s) => `<option value="${esc(s)}"${s === data.system ? ' selected' : ''}>${esc(s)}</option>`).join('');
@@ -3101,6 +3106,18 @@ tzForm.addEventListener('submit', async (e) => {
 // TZ popup close
 tzCancelBtn.addEventListener('click', () => hide(tzPopup));
 tzPopup.addEventListener('click', (e) => { if (e.target === tzPopup && confirm('Закрыть окно?')) hide(tzPopup); });
+
+// TZ delete (superadmin only)
+tzDeleteBtn.addEventListener('click', async () => {
+  if (!state.tzEditId) return;
+  if (!confirm('Удалить ТЗ? Это действие необратимо.')) return;
+  try {
+    await api(`/api/tz/${state.tzEditId}`, { method: 'DELETE', body: JSON.stringify({}) });
+    showToast('ТЗ удалено', 'ok');
+    hide(tzPopup);
+    loadTzData();
+  } catch (err) { showToast(err.message, 'danger'); }
+});
 
 /* ── Kanban view ── */
 

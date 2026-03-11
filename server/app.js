@@ -2735,6 +2735,35 @@ app.post('/api/admin/tz', async (req, res) => {
   return res.json(paginate(items, page, pageSize));
 });
 
+/* ── Delete TZ (superadmin only) ── */
+
+app.delete('/api/tz/:id', async (req, res) => {
+  const pin = getPin(req);
+  const authUser = await requireSuperAdmin(pin);
+  if (!authUser) return res.status(403).json({ message: 'Нет доступа.' });
+
+  const id = req.params.id;
+  return withLock(FILES.tz, async () => {
+    const allTz = await readJson(FILES.tz, []);
+    const idx = allTz.findIndex(t => t.id === id);
+    if (idx === -1) return res.status(404).json({ message: 'ТЗ не найдено.' });
+
+    const tz = allTz[idx];
+    allTz.splice(idx, 1);
+    await writeJson(FILES.tz, allTz);
+
+    // Also remove related comments
+    const comments = await readJson(FILES.tzComments, []);
+    const filtered = comments.filter(c => c.tz_id !== id);
+    if (filtered.length !== comments.length) {
+      await writeJson(FILES.tzComments, filtered);
+    }
+
+    auditLog('delete-tz', authUser.fullName, { tzId: id, tzCode: tz.tz_code, title: tz.title });
+    return res.json({ message: 'ТЗ удалено.' });
+  });
+});
+
 /* ── Approve Предложение (superadmin only) ── */
 
 app.patch('/api/tz/:id/approve', async (req, res) => {
